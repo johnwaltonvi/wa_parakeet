@@ -1,0 +1,20 @@
+[Unit]
+Description=Parakeet Push-To-Talk Dictation
+After=graphical-session.target sound.target
+Wants=graphical-session.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/wa_parakeet
+Environment=DISPLAY=%E{DISPLAY}
+Environment=XAUTHORITY=%E{XAUTHORITY}
+ExecStartPre=/usr/bin/mkdir -p %h/.cache/Parakeet
+ExecStart=%h/wa_parakeet/scripts/parakeet-ptt-start --append-space --rms-threshold 1.5e-5 --preamp 1.8
+ExecStop=%h/wa_parakeet/scripts/parakeet-ptt-stop
+Restart=on-failure
+RestartSec=5
+StandardOutput=append:%h/.cache/Parakeet/service.log
+StandardError=append:%h/.cache/Parakeet/service.log
+
+[Install]
+WantedBy=default.target

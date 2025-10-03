@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+COOKIE_PATH="${PARAKEET_COOKIE:-/tmp/parakeet-ptt.pid}"
+if [ -f "$COOKIE_PATH" ]; then
+  if pid=$(cat "$COOKIE_PATH" 2>/dev/null); then
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid"
+      exit 0
+    fi
+  fi
+fi
+pkill -f "parakeet_push_to_talk.py" || true
