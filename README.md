@@ -8,6 +8,7 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - Right-Alt push-to-talk capture with silence timeout and preamp controls
 - NVIDIA NeMo Parakeet transcription (`nvidia/parakeet-tdt-0.6b-v2` by default)
 - Text injection into the focused window via `xdotool`
+- Automatic muting of desktop audio while recording (disable with `--no-auto-mute`)
 - Helper scripts for local runs, service management, and model prefetching
 - Optional user-level systemd unit with restart-on-failure semantics
 
@@ -42,7 +43,7 @@ List available devices with `python -m sounddevice` after activating the virtual
 
 ## Systemd Integration
 1. Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/` and adjust `WorkingDirectory` if the clone lives elsewhere.
-2. Import graphical environment variables once per login (GNOME usually handles this automatically):
+2. Ensure the unit has access to your X session. Either set static values inside the service (e.g., `Environment=DISPLAY=:1` and `Environment=XAUTHORITY=%h/.Xauthority`) or import the live environment after login:
    ```bash
    systemctl --user import-environment DISPLAY XAUTHORITY
    ```

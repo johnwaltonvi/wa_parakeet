@@ -4,6 +4,7 @@ import argparse
 import atexit
 import os
 import queue
+import shutil
 import signal
 import subprocess
 import sys
@@ -88,6 +89,13 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_COOKIE),
         help="PID file used to avoid duplicate instances",
     )
+    parser.add_argument(
+        "--no-auto-mute",
+        action="store_false",
+        dest="auto_mute",
+        help="Disable automatic muting of system audio while recording",
+    )
+    parser.set_defaults(auto_mute=True)
     return parser.parse_args()
 
 
@@ -213,6 +221,160 @@ class Recorder:
         return self._file
 
 
+class AudioMuteError(Exception):
+    """Raised when system audio mute operations fail."""
+
+
+class AudioMuteController:
+    """Wrap wpctl/pactl to mute desktop audio during capture."""
+
+    def __init__(self, log_path: Path):
+        self.log_path = log_path
+        self._strategy: "_BaseMuteStrategy | None" = self._detect_strategy()
+
+    def _detect_strategy(self) -> "_BaseMuteStrategy | None":
+        if shutil.which("wpctl"):
+            return _WpctlStrategy(self.log_path)
+        if shutil.which("pactl"):
+            return _PactlStrategy(self.log_path)
+        write_log("Auto-mute unavailable: wpctl/pactl not found", self.log_path)
+        return None
+
+    def mute(self) -> None:
+        if not self._strategy:
+            return
+        try:
+            self._strategy.mute()
+        except AudioMuteError as exc:
+            write_log(f"Failed to mute system audio: {exc}", self.log_path)
+            self._strategy = None
+
+    def restore(self) -> None:
+        if not self._strategy:
+            return
+        try:
+            self._strategy.restore()
+        except AudioMuteError as exc:
+            write_log(f"Failed to restore system audio: {exc}", self.log_path)
+            self._strategy = None
+
+
+class _BaseMuteStrategy:
+    def __init__(self, log_path: Path):
+        self.log_path = log_path
+        self._active = False
+        self._previously_muted: bool | None = None
+
+    def mute(self) -> None:
+        raise NotImplementedError
+
+    def restore(self) -> None:
+        raise NotImplementedError
+
+
+class _WpctlStrategy(_BaseMuteStrategy):
+    _TARGET = "@DEFAULT_AUDIO_SINK@"
+
+    def mute(self) -> None:
+        if self._active:
+            return
+        self._previously_muted = self._read_muted()
+        try:
+            subprocess.run(["wpctl", "set-mute", self._TARGET, "1"], check=True)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"wpctl set-mute failed: {exc}") from exc
+        self._active = True
+        write_log("Muted system audio via wpctl", self.log_path)
+
+    def restore(self) -> None:
+        if not self._active:
+            return
+        try:
+            if self._previously_muted is False:
+                subprocess.run(["wpctl", "set-mute", self._TARGET, "0"], check=True)
+                write_log("Restored system audio via wpctl", self.log_path)
+            else:
+                write_log("System audio was muted before recording; leaving muted", self.log_path)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"wpctl set-mute restore failed: {exc}") from exc
+        finally:
+            self._active = False
+            self._previously_muted = None
+
+    def _read_muted(self) -> bool | None:
+        try:
+            output = subprocess.check_output(["wpctl", "get-volume", self._TARGET], text=True)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"wpctl get-volume failed: {exc}") from exc
+        normalized = output.strip().lower()
+        if "muted:" in normalized:
+            return "muted: yes" in normalized
+        if "[muted]" in normalized:
+            return True
+        return False
+
+
+class _PactlStrategy(_BaseMuteStrategy):
+    def __init__(self, log_path: Path):
+        super().__init__(log_path)
+        self._sink = self._detect_sink()
+
+    def mute(self) -> None:
+        if self._active:
+            return
+        self._previously_muted = self._read_muted()
+        try:
+            subprocess.run(["pactl", "set-sink-mute", self._sink, "1"], check=True)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"pactl set-sink-mute failed: {exc}") from exc
+        self._active = True
+        write_log(f"Muted system audio via pactl (sink {self._sink})", self.log_path)
+
+    def restore(self) -> None:
+        if not self._active:
+            return
+        try:
+            if self._previously_muted is False:
+                subprocess.run(["pactl", "set-sink-mute", self._sink, "0"], check=True)
+                write_log(f"Restored system audio via pactl (sink {self._sink})", self.log_path)
+            else:
+                write_log("System audio was muted before recording; leaving muted", self.log_path)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"pactl set-sink-mute restore failed: {exc}") from exc
+        finally:
+            self._active = False
+            self._previously_muted = None
+
+    def _read_muted(self) -> bool | None:
+        try:
+            output = subprocess.check_output(["pactl", "get-sink-mute", self._sink], text=True)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"pactl get-sink-mute failed: {exc}") from exc
+        normalized = output.strip().lower()
+        if "yes" in normalized:
+            return True
+        if "no" in normalized:
+            return False
+        return False
+
+    def _detect_sink(self) -> str:
+        try:
+            sink = subprocess.check_output(["pactl", "get-default-sink"], text=True).strip()
+            if sink:
+                return sink
+        except subprocess.CalledProcessError:
+            pass
+        try:
+            output = subprocess.check_output(["pactl", "list", "short", "sinks"], text=True)
+        except subprocess.CalledProcessError as exc:
+            raise AudioMuteError(f"pactl list short sinks failed: {exc}") from exc
+        for line in output.splitlines():
+            parts = line.split("\t")
+            if parts:
+                return parts[0]
+        raise AudioMuteError("No PulseAudio sinks found")
+
+
 class ParakeetPTT:
     def __init__(self, args: argparse.Namespace):
         self.args = args
@@ -234,6 +396,9 @@ class ParakeetPTT:
         self.recording = False
         self.lock = threading.Lock()
         self.allow_esc = args.allow_esc
+        self.audio_muter = AudioMuteController(self.log_path) if args.auto_mute else None
+        if not args.auto_mute:
+            write_log("Auto-mute disabled via CLI flag", self.log_path)
 
     def _load_model(self, model_name: str) -> ASRModel:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -246,15 +411,26 @@ class ParakeetPTT:
         with self.lock:
             if self.recording:
                 return
-            self.recorder.start()
+            if self.audio_muter:
+                self.audio_muter.mute()
+            try:
+                self.recorder.start()
+            except Exception:
+                if self.audio_muter:
+                    self.audio_muter.restore()
+                raise
             self.recording = True
 
     def stop_recording_and_transcribe(self):
         with self.lock:
             if not self.recording:
                 return
-            audio_path = self.recorder.stop(self.args.timeout)
-            self.recording = False
+            try:
+                audio_path = self.recorder.stop(self.args.timeout)
+            finally:
+                if self.audio_muter:
+                    self.audio_muter.restore()
+                self.recording = False
 
         if not audio_path or audio_path.stat().st_size == 0:
             write_log("No audio captured", self.log_path)
