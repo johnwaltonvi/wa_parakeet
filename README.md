@@ -7,6 +7,7 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 ## Features
 - Right-Alt push-to-talk capture with silence timeout and preamp controls
 - NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting
+- Optional emotion detection (SpeechBrain wav2vec2 SER) to inject emphasis or emotion tags
 - Text injection into the focused window via `xdotool`
 - Automatic muting of desktop audio while recording (disable with `--no-auto-mute`)
 - Helper scripts for local runs, service management, and model/decoder management
@@ -19,6 +20,7 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - GPU optional: CUDA accelerates inference but the script runs on CPU as well
 - Flashlight text decoder and KenLM binaries (build from source) for advanced beam-search support
 - NeMo NLP extras for punctuation/capitalization post-processing (`nemo-toolkit[asr,nlp]==2.4.1`)
+- SpeechBrain for emotion recognition (`speechbrain==0.5.15`)
 
 ### Flashlight & KenLM Setup
 
@@ -96,6 +98,17 @@ The 1.1B Parakeet stack can be combined with the Flashlight beam-search decoder 
 - Use `./scripts/refresh_hotwords.py` to regenerate the hotword TSV and `./scripts/build_kenlm.py` to rebuild the KenLM binary whenever your projects change.
 - ⚠️ NeMo currently exposes only the built-in greedy/beam/MAES decoders for Parakeet-TDT models; if Flashlight integration is unavailable the listener logs a warning and keeps the model default decoder.
 - Punctuation and capitalization post-processing defaults to the NeMo `punctuation_en_bert` model; disable with `--disable-punctuation` or swap via `--punctuation-model`.
+- Emotion detection defaults to `speechbrain/emotion-recognition-wav2vec2-IEMOCAP`; disable with `--disable-emotion`, adjust confidence with `--emotion-threshold`, and add tags using `--emotion-tag`.
+
+## Emotion-Aware Punctuation
+
+- Emotion inference is applied to the raw transcript before punctuation so exclamations or tags reflect the detected tone once the punctuation model runs.
+- Supported toggles:
+  - `--emotion-model` – switch to another SpeechBrain-compatible classifier.
+  - `--emotion-threshold` – confidence (0–1) required before adding emphasis (default `0.6`).
+  - `--emotion-tag` – prefix output with `[EMOTION]` when above threshold.
+  - `--disable-emotion` – bypass the SER stage entirely.
+- By default we append `!` when the detector is confident the speaker sounds excited/angry/surprised.
 - `./scripts/parakeet-ptt` accepts overrides:
   - `--decoder-config PATH` – YAML with preset definitions.
   - `--decoder-preset NAME` – preset to load (defaults to `live_fast`).

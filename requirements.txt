@@ -1,4 +1,5 @@
 nemo-toolkit[asr,nlp]==2.4.1
+speechbrain==0.5.15
 torch==2.8.0
 torchaudio==2.8.0
 sounddevice==0.5.2

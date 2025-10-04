@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import numpy as np
 import sounddevice as sd
@@ -23,6 +23,10 @@ try:
     from nemo.collections.nlp.models import PunctuationCapitalizationModel
 except ImportError:  # pragma: no cover - optional dependency
     PunctuationCapitalizationModel = None  # type: ignore[assignment]
+try:
+    from speechbrain.pretrained.interfaces import foreign_class
+except ImportError:  # pragma: no cover - optional dependency
+    foreign_class = None  # type: ignore[assignment]
 from pynput import keyboard
 
 try:
@@ -44,9 +48,13 @@ DEFAULT_SAMPLE_RATE = 16_000
 DEFAULT_DECODER_CONFIG = REPO_ROOT / "config" / "decoder_presets.yaml"
 DEFAULT_DECODER_PRESET = "live_fast"
 DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
+DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
+DEFAULT_EMOTION_THRESHOLD = 0.6
+EMOTION_EXCLAIM_LABELS = {"angry", "anger", "happy", "excited", "surprise", "surprised"}
 
 
 _PUNCTUATION_MODELS: dict[str, PunctuationCapitalizationModel] = {}
+_EMOTION_MODELS: dict[str, Any] = {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -158,6 +166,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable punctuation and capitalization post-processing",
     )
+    parser.add_argument(
+        "--emotion-model",
+        default=DEFAULT_EMOTION_MODEL,
+        help="Speech emotion recognition model to load (SpeechBrain foreign class string)",
+    )
+    parser.add_argument(
+        "--disable-emotion",
+        action="store_true",
+        help="Disable emotion detection and emphasis adjustments",
+    )
+    parser.add_argument(
+        "--emotion-threshold",
+        type=float,
+        default=DEFAULT_EMOTION_THRESHOLD,
+        help="Confidence threshold [0-1] before applying emotion-driven punctuation",
+    )
+    parser.add_argument(
+        "--emotion-tag",
+        action="store_true",
+        help="Prefix transcripts with the dominant emotion label when above threshold",
+    )
     return parser.parse_args()
 
 
@@ -223,6 +252,29 @@ def _load_punctuation_model(name: str, device: torch.device, log_path: Path) -> 
     _PUNCTUATION_MODELS[name] = model
     write_log(f"Loaded punctuation model {name} on {device}", log_path)
     return model
+
+
+def _load_emotion_model(name: str, device: torch.device, log_path: Path) -> Optional[Any]:
+    if foreign_class is None:
+        write_log("SpeechBrain is not installed; skipping emotion detection.", log_path)
+        return None
+    cached = _EMOTION_MODELS.get(name)
+    if cached is not None:
+        return cached
+    device_str = str(device)
+    try:
+        classifier = foreign_class(
+            source=name,
+            pymodule_file="custom_interface.py",
+            classname="CustomEncoderWav2vec2Classifier",
+            run_opts={"device": device_str},
+        )
+    except Exception as exc:  # noqa: BLE001
+        write_log(f"Failed to load emotion model {name}: {exc}", log_path)
+        return None
+    _EMOTION_MODELS[name] = classifier
+    write_log(f"Loaded emotion model {name} on {device_str}", log_path)
+    return classifier
 
 
 def _configure_decoder_from_preset(
@@ -571,14 +623,22 @@ class ParakeetPTT:
             self.log_path,
         )
         self.model = self._load_model(args.model)
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         if args.disable_punctuation:
             write_log("Punctuation post-processing disabled via flag", self.log_path)
             self.punctuation_model = None
         else:
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             self.punctuation_model = _load_punctuation_model(args.punctuation_model, device, self.log_path)
             if self.punctuation_model is None:
                 write_log("Continuing without punctuation post-processing", self.log_path)
+        if args.disable_emotion:
+            write_log("Emotion detection disabled via flag", self.log_path)
+            self.emotion_model = None
+        else:
+            self.emotion_model = _load_emotion_model(args.emotion_model, device, self.log_path)
+        self.emotion_threshold = args.emotion_threshold
+        self.emotion_tag = args.emotion_tag
+        self.last_emotion: Optional[Dict[str, Any]] = None
         self.recorder = Recorder(args.sample_rate, self.device_index, self.log_path, args.rms_threshold, args.preamp)
         self.recording = False
         self.lock = threading.Lock()
@@ -622,7 +682,59 @@ class ParakeetPTT:
         except Exception as exc:  # noqa: BLE001
             write_log(f"Failed to apply Flashlight decoder preset: {exc}", self.log_path)
         return model
-        return model
+
+    def _evaluate_emotion(self, audio_path: Path) -> Optional[Dict[str, Any]]:
+        if self.emotion_model is None:
+            return None
+        try:
+            result = self.emotion_model.classify_file(str(audio_path))
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Emotion model inference failed: {exc}", self.log_path)
+            return None
+
+        labels = result.get("labels") or result.get("classes")
+        scores = result.get("scores")
+        if scores is None or labels is None:
+            write_log("Emotion model returned unexpected output", self.log_path)
+            return None
+
+        if isinstance(scores, torch.Tensor):
+            scores = scores.detach().cpu().tolist()
+        if isinstance(scores, (list, tuple)) and scores and isinstance(scores[0], (list, tuple)):
+            scores = scores[0]
+
+        try:
+            mapping = {label: float(score) for label, score in zip(labels, scores)}
+        except Exception:  # pragma: no cover - defensive
+            write_log("Failed to map emotion scores", self.log_path)
+            return None
+
+        if not mapping:
+            return None
+
+        label, score = max(mapping.items(), key=lambda item: item[1])
+        info = {"label": label, "score": score, "scores": mapping}
+        self.last_emotion = info
+        write_log(f"Emotion detection: {label} ({score:.2f})", self.log_path)
+        return info
+
+    def _apply_emotion_rules(self, text: str, info: Dict[str, Any]) -> tuple[str, Optional[str]]:
+        label = info.get("label", "").lower()
+        score = float(info.get("score", 0.0))
+        force_terminal: Optional[str] = None
+
+        if self.emotion_tag and label:
+            tag = label.upper()
+            text = f"[{tag}] {text}" if text else f"[{tag}]"
+
+        if score >= self.emotion_threshold:
+            if label in EMOTION_EXCLAIM_LABELS and text:
+                force_terminal = "!"
+                if text[-1] not in {"!", "?"}:
+                    text = text.rstrip()
+                    text = text.rstrip(". ")
+                    text += "!"
+        return text, force_terminal
 
     def start_recording(self):
         with self.lock:
@@ -665,6 +777,10 @@ class ParakeetPTT:
         else:
             text = str(hypotheses)
         text = text.strip()
+        force_terminal: Optional[str] = None
+        emotion_info = self._evaluate_emotion(audio_path)
+        if emotion_info:
+            text, force_terminal = self._apply_emotion_rules(text, emotion_info)
         if text and self.punctuation_model is not None:
             try:
                 punctuated = self.punctuation_model.add_punctuation_capitalization([text])[0]
@@ -672,6 +788,12 @@ class ParakeetPTT:
                     text = punctuated.strip()
             except Exception as exc:  # noqa: BLE001
                 write_log(f"Failed to apply punctuation model: {exc}", self.log_path)
+        if force_terminal and text:
+            stripped = text.rstrip()
+            if not stripped.endswith(force_terminal):
+                stripped = stripped.rstrip(". ?!")
+                stripped += force_terminal
+                text = stripped
         if self.args.append_space and text:
             text += " "
         write_log(f"Recognized text: {text!r}", self.log_path)
