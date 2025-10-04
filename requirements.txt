@@ -1,7 +1,9 @@
-nemo-toolkit[asr]==2.4.1
-torch==2.5.1
-torchaudio==2.5.1
+nemo-toolkit[asr,nlp]==2.4.1
+torch==2.8.0
+torchaudio==2.8.0
 sounddevice==0.5.2
 soundfile==0.13.1
 numpy==1.26.4
 pynput==1.8.1
+omegaconf==2.3.0
+PyYAML==6.0.2

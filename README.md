@@ -6,10 +6,10 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 
 ## Features
 - Right-Alt push-to-talk capture with silence timeout and preamp controls
-- NVIDIA NeMo Parakeet transcription (`nvidia/parakeet-tdt-0.6b-v2` by default)
+- NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting
 - Text injection into the focused window via `xdotool`
 - Automatic muting of desktop audio while recording (disable with `--no-auto-mute`)
-- Helper scripts for local runs, service management, and model prefetching
+- Helper scripts for local runs, service management, and model/decoder management
 - Optional user-level systemd unit with restart-on-failure semantics
 
 ## Requirements
@@ -17,6 +17,24 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - Python 3.10+ and `python3-venv`
 - System packages: `ffmpeg`, `xdotool`, `libsndfile1`
 - GPU optional: CUDA accelerates inference but the script runs on CPU as well
+- Flashlight text decoder and KenLM binaries (build from source) for advanced beam-search support
+- NeMo NLP extras for punctuation/capitalization post-processing (`nemo-toolkit[asr,nlp]==2.4.1`)
+
+### Flashlight & KenLM Setup
+
+1. Install KenLM (build from source) so `lmplz` and `build_binary` are on your `PATH`.
+2. Build the Flashlight text decoder bindings following the [Flashlight instructions](https://github.com/flashlight/text). Ensure the Python wheel installs into this virtualenv (`pip install ./build/dist/*.whl`).
+3. Verify imports work inside the virtualenv:
+   ```bash
+   python -c "from flashlight.lib.text.decoder import KenLM"
+   ```
+4. Use the helper scripts in this repo to generate resources:
+   ```bash
+   ./scripts/refresh_hotwords.py ~/Documents/wise_apple
+   ./scripts/curate_hotwords.py --limit 500
+   ./scripts/build_kenlm.py --source ~/Documents/wise_apple --output lm/programming_5gram.binary
+   ```
+   Adjust source paths or pass `--input` if you maintain a curated corpus.
 
 ## Quick Start
 ```bash
@@ -26,6 +44,11 @@ cd ~/wa_parakeet
 
 # (Optional) Prefetch the model so the first run is faster
 ./scripts/download_model.py
+
+# (Recommended) Build vocab + LM assets (adjust source path to your repos)
+./scripts/refresh_hotwords.py ~/Documents/wise_apple
+./scripts/curate_hotwords.py --limit 500
+./scripts/build_kenlm.py --source ~/Documents/wise_apple --output lm/programming_5gram.binary
 
 # Launch manually
 ./scripts/parakeet-ptt --append-space --allow-esc
@@ -55,6 +78,37 @@ List available devices with `python -m sounddevice` after activating the virtual
 
 The unit restarts on failure and inherits `DISPLAY`/`XAUTHORITY` via systemd specifiers.
 
+## Model Upgrades
+Run `./scripts/upgrade_parakeet_model` any time NVIDIA publishes a new Parakeet-TDT release (0.6B or 1.1B). The helper script:
+
+- Detects the latest release from Hugging Face and compares it to the configured model.
+- Stops the running `parakeet-ptt` service, backs up the cached weights, and downloads the newer model.
+- Updates `DEFAULT_MODEL` in `src/parakeet_push_to_talk.py`, restarts the service, and tails the log to confirm the upgrade succeeded.
+
+Use `--dry-run` to check the latest version without making changes.
+
+## Flashlight Decoder & Vocabulary
+
+The 1.1B Parakeet stack can be combined with the Flashlight beam-search decoder for maximum accuracy:
+
+- Decoder presets live in `config/decoder_presets.yaml`. Each preset specifies beam search parameters plus resource paths.
+- Runtime resources sit under `vocab.d/` (hotword boosts + pronunciation lexicon) and `lm/` (KenLM binary). Populate these before launching `parakeet-ptt`.
+- Use `./scripts/refresh_hotwords.py` to regenerate the hotword TSV and `./scripts/build_kenlm.py` to rebuild the KenLM binary whenever your projects change.
+- ⚠️ NeMo currently exposes only the built-in greedy/beam/MAES decoders for Parakeet-TDT models; if Flashlight integration is unavailable the listener logs a warning and keeps the model default decoder.
+- Punctuation and capitalization post-processing defaults to the NeMo `punctuation_en_bert` model; disable with `--disable-punctuation` or swap via `--punctuation-model`.
+- `./scripts/parakeet-ptt` accepts overrides:
+  - `--decoder-config PATH` – YAML with preset definitions.
+  - `--decoder-preset NAME` – preset to load (defaults to `live_fast`).
+  - `--lm-path`, `--lexicon-path`, `--hotword-path` – per-run overrides.
+  - `--disable-decoder-tuning` – fall back to the model’s default greedy decoder.
+
+Presets target two workflows out of the box:
+
+- `offline_best` – large beam, highest accuracy for batch/offline dictation.
+- `live_fast` – smaller beam tuned for interactive push-to-talk.
+
+Update the vocab files as projects change; the listener reloads them on the next start.
+
 ## Repository Layout
 ```
 wa_parakeet/
@@ -63,6 +117,9 @@ wa_parakeet/
 ├── requirements.txt         # Python dependencies
 ├── src/                     # Dictation listener source
 ├── scripts/                 # Helper shell/python scripts (bootstrap, run, stop)
+├── config/                  # Decoder preset definitions
+├── vocab.d/                 # Hotword boosts and pronunciation lexicon
+├── lm/                      # KenLM binaries and helper docs
 └── systemd/                 # Example user service definition
 ```
 

@@ -1,0 +1,160 @@
+# token	boost	display	tags
+Altcoin	90	Altcoin	crypto
+amm	90	amm	crypto
+Automated Market Maker	90	Automated Market Maker	crypto
+Bitcoin	90	Bitcoin	crypto
+defi	90	defi	crypto
+DeFi Yield	85	DeFi Yield	crypto
+dydx	90	dydx	crypto
+Ethereum	90	Ethereum	crypto
+fomo	85	fomo	crypto
+Funding Rate	90	Funding Rate	crypto
+Gas Fees	85	Gas Fees	crypto
+HODL	90	HODL	crypto
+hodl	90	hodl	crypto
+Layer 2	85	Layer 2	crypto
+Liquidity Pool	90	Liquidity Pool	crypto
+Mark Price	90	Mark Price	crypto
+Perpetual Swap	90	Perpetual Swap	crypto
+Proof of Stake	90	Proof of Stake	crypto
+Proof of Work	90	Proof of Work	crypto
+Satoshi	90	Satoshi	crypto
+Stablecoin	90	Stablecoin	crypto
+Staking	85	Staking	crypto
+Staking Rewards	85	Staking Rewards	crypto
+Whale	90	Whale	crypto
+A/B Test	85	A/B Test	marketing
+Attribution Model	90	Attribution Model	marketing
+CAC	95	CAC	marketing
+Click Through Rate	90	Click Through Rate	marketing
+Conversion Rate	90	Conversion Rate	marketing
+Cost Per Lead	90	Cost Per Lead	marketing
+CPC	95	CPC	marketing
+cpc	95	cpc	marketing
+CPM	95	CPM	marketing
+cpm	95	cpm	marketing
+CTR	95	CTR	marketing
+ctr	95	ctr	marketing
+Customer Journey	85	Customer Journey	marketing
+Customer Lifetime Value	90	Customer Lifetime Value	marketing
+Demand Generation	85	Demand Generation	marketing
+Impression Share	85	Impression Share	marketing
+kpi	90	kpi	marketing
+Landing Page	85	Landing Page	marketing
+Lookalike Audience	90	Lookalike Audience	marketing
+LTV	95	LTV	marketing
+Marketing Funnel	85	Marketing Funnel	marketing
+mql	90	mql	marketing
+Programmatic Advertising	90	Programmatic Advertising	marketing
+Retargeting	90	Retargeting	marketing
+ROAS	95	ROAS	marketing
+roas	95	roas	marketing
+ROI	95	ROI	marketing
+Session Recording	80	Session Recording	marketing
+sql	90	sql	marketing
+UTM Parameter	85	UTM Parameter	marketing
+Autoencoder	85	Autoencoder	ml
+Backpropagation	95	Backpropagation	ml
+BLEU Score	85	BLEU Score	ml
+CatBoost	90	CatBoost	ml
+catboost	90	catboost	ml
+Contrastive Learning	90	Contrastive Learning	ml
+Cross-Entropy	90	Cross-Entropy	ml
+Diffusion Model	90	Diffusion Model	ml
+embedding	85	embedding	ml
+Embeddings	85	Embeddings	ml
+Few-Shot	90	Few-Shot	ml
+Fine-Tuning	90	Fine-Tuning	ml
+Gradient Descent	90	Gradient Descent	ml
+JAX	90	JAX	ml
+Latent Space	85	Latent Space	ml
+Learning Rate	85	Learning Rate	ml
+LightGBM	90	LightGBM	ml
+lightgbm	90	lightgbm	ml
+llm	95	llm	ml
+NumPy	90	NumPy	ml
+Pandas	90	Pandas	ml
+Perplexity Score	85	Perplexity Score	ml
+Prompt Engineering	90	Prompt Engineering	ml
+PyTorch	95	PyTorch	ml
+pytorch	95	pytorch	ml
+Reinforcement Learning	90	Reinforcement Learning	ml
+scikit-learn	90	scikit-learn	ml
+Self-Attention	90	Self-Attention	ml
+TensorFlow	95	TensorFlow	ml
+tensorflow	95	tensorflow	ml
+Tokenization	85	Tokenization	ml
+tokenization	85	tokenization	ml
+Transformer	95	Transformer	ml
+XGBoost	90	XGBoost	ml
+xgboost	90	xgboost	ml
+Zero-Shot	90	Zero-Shot	ml
+WebAssembly	85	WebAssembly	programming
+Actix	80	Actix	rust
+Arc	80	Arc	rust
+async/await	90	async/await	rust
+Axum	80	Axum	rust
+Borrow Checker	95	Borrow Checker	rust
+BorrowMut	80	BorrowMut	rust
+BTreeMap	85	BTreeMap	rust
+BTreeSet	85	BTreeSet	rust
+Cargo.lock	90	Cargo.lock	rust
+Cargo.toml	95	Cargo.toml	rust
+Clippy	80	Clippy	rust
+Crate Graph	80	Crate Graph	rust
+HashMap	85	HashMap	rust
+HashSet	85	HashSet	rust
+Hyper	80	Hyper	rust
+Lifetimes	90	Lifetimes	rust
+macro_rules!	85	macro_rules!	rust
+MutexGuard	80	MutexGuard	rust
+neon	75	neon	rust
+Nightly Rust	80	Nightly Rust	rust
+no_std	85	no_std	rust
+Ownership	95	Ownership	rust
+Pin	80	Pin	rust
+Polars	85	Polars	rust
+Rc	80	Rc	rust
+Reqwest	80	Reqwest	rust
+Rust Analyzer	85	Rust Analyzer	rust
+Rustfmt	80	Rustfmt	rust
+RwLock	80	RwLock	rust
+SeaORM	80	SeaORM	rust
+Send	80	Send	rust
+Serde	85	Serde	rust
+serde	85	serde	rust
+Sync	80	Sync	rust
+Tokio	85	Tokio	rust
+tokio	85	tokio	rust
+Tonic	80	Tonic	rust
+Trait Object	85	Trait Object	rust
+UnsafeCell	80	UnsafeCell	rust
+VecDeque	85	VecDeque	rust
+WasmBindgen	85	WasmBindgen	rust
+wasmtime	80	wasmtime	rust
+Zero Copy	80	Zero Copy	rust
+ADX	95	ADX	trading
+adx	95	adx	trading
+ATR	95	ATR	trading
+atr	95	atr	trading
+Bear Trap	90	Bear Trap	trading
+Bid Ask Spread	90	Bid Ask Spread	trading
+Bollinger Bands	95	Bollinger Bands	trading
+Bull Trap	90	Bull Trap	trading
+Candlestick	90	Candlestick	trading
+Candlestick Pattern	90	Candlestick Pattern	trading
+Depth Chart	90	Depth Chart	trading
+Dollar Cost Averaging	90	Dollar Cost Averaging	trading
+EMA	95	EMA	trading
+ema	95	ema	trading
+Fibonacci Retracement	90	Fibonacci Retracement	trading
+MACD	95	MACD	trading
+OHLC	95	OHLC	trading
+Order Book	90	Order Book	trading
+RSI	95	RSI	trading
+SMA	95	SMA	trading
+sma	95	sma	trading
+Stop Loss	90	Stop Loss	trading
+Take Profit	90	Take Profit	trading
+VWAP	95	VWAP	trading
+vwap	95	vwap	trading

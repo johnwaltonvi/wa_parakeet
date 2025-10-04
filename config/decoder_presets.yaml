@@ -1,0 +1,25 @@
+presets:
+  offline_best:
+    decoder_type: flashlight
+    beam_size: 32
+    beam_threshold: 25.0
+    lm_weight: 2.5
+    word_insertion_bonus: -0.5
+    length_bonus: 0.2
+    max_batches: 1
+    hotwords: vocab.d/hotwords.tsv
+    lexicon: vocab.d/lexicon.tsv
+    lm_binary: lm/programming_5gram.binary
+    use_timestamps: false
+  live_fast:
+    decoder_type: flashlight
+    beam_size: 12
+    beam_threshold: 25.0
+    lm_weight: 1.6
+    word_insertion_bonus: -0.3
+    length_bonus: 0.1
+    max_batches: 2
+    hotwords: vocab.d/hotwords.tsv
+    lexicon: vocab.d/lexicon.tsv
+    lm_binary: lm/programming_5gram.binary
+    use_timestamps: false

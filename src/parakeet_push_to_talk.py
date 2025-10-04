@@ -12,19 +12,41 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import Any, Dict
 
 import numpy as np
 import sounddevice as sd
 import soundfile as sf
 import torch
 from nemo.collections.asr.models import ASRModel
+try:
+    from nemo.collections.nlp.models import PunctuationCapitalizationModel
+except ImportError:  # pragma: no cover - optional dependency
+    PunctuationCapitalizationModel = None  # type: ignore[assignment]
 from pynput import keyboard
 
+try:
+    import yaml
+except ImportError:  # pragma: no cover - handled at runtime
+    yaml = None
 
+try:
+    from omegaconf import OmegaConf
+except ImportError:  # pragma: no cover - handled at runtime
+    OmegaConf = None
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOG = Path.home() / ".cache" / "Parakeet" / "push_to_talk.log"
 DEFAULT_COOKIE = Path("/tmp/parakeet-ptt.pid")
-DEFAULT_MODEL = "nvidia/parakeet-tdt-0.6b-v2"
+DEFAULT_MODEL = "nvidia/parakeet-tdt-1.1b"
 DEFAULT_SAMPLE_RATE = 16_000
+DEFAULT_DECODER_CONFIG = REPO_ROOT / "config" / "decoder_presets.yaml"
+DEFAULT_DECODER_PRESET = "live_fast"
+DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
+
+
+_PUNCTUATION_MODELS: dict[str, PunctuationCapitalizationModel] = {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -96,6 +118,46 @@ def parse_args() -> argparse.Namespace:
         help="Disable automatic muting of system audio while recording",
     )
     parser.set_defaults(auto_mute=True)
+    parser.add_argument(
+        "--decoder-config",
+        default=str(DEFAULT_DECODER_CONFIG),
+        help="Path to YAML file containing decoder presets",
+    )
+    parser.add_argument(
+        "--decoder-preset",
+        default=DEFAULT_DECODER_PRESET,
+        help="Name of the decoder preset to apply (see decoder config)",
+    )
+    parser.add_argument(
+        "--lm-path",
+        default=None,
+        help="Override KenLM binary path for decoding",
+    )
+    parser.add_argument(
+        "--lexicon-path",
+        default=None,
+        help="Override pronunciation lexicon path",
+    )
+    parser.add_argument(
+        "--hotword-path",
+        default=None,
+        help="Override hotword TSV for runtime boosts",
+    )
+    parser.add_argument(
+        "--disable-decoder-tuning",
+        action="store_true",
+        help="Skip Flashlight/LM configuration and rely on the model default decoder",
+    )
+    parser.add_argument(
+        "--punctuation-model",
+        default=DEFAULT_PUNCTUATION_MODEL,
+        help="Pretrained NeMo punctuation+capitalization model to apply",
+    )
+    parser.add_argument(
+        "--disable-punctuation",
+        action="store_true",
+        help="Disable punctuation and capitalization post-processing",
+    )
     return parser.parse_args()
 
 
@@ -118,6 +180,123 @@ def write_log(msg: str, log_path: Path) -> None:
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     with log_path.open("a", encoding="utf-8") as fh:
         fh.write(f"[{timestamp}] {msg}\n")
+
+
+def _load_decoder_presets(config_path: Path) -> Dict[str, Dict[str, Any]]:
+    if yaml is None:
+        raise RuntimeError("PyYAML is required to parse decoder preset files. Install pyyaml to continue.")
+    if not config_path.exists():
+        raise FileNotFoundError(f"Decoder preset file not found: {config_path}")
+    with config_path.open("r", encoding="utf-8") as fh:
+        data = yaml.safe_load(fh)
+    if not isinstance(data, dict) or "presets" not in data:
+        raise ValueError(f"Decoder preset file {config_path} is missing a top-level 'presets' mapping")
+    presets = data["presets"]
+    if not isinstance(presets, dict):
+        raise ValueError("Decoder presets must be a mapping of preset names to configuration blocks")
+    return presets
+
+
+def _resolve_resource(path_hint: str | None) -> Path | None:
+    if not path_hint:
+        return None
+    path = Path(path_hint).expanduser()
+    if not path.is_absolute():
+        path = (REPO_ROOT / path).resolve()
+    return path
+
+
+def _load_punctuation_model(name: str, device: torch.device, log_path: Path) -> PunctuationCapitalizationModel | None:
+    if PunctuationCapitalizationModel is None:
+        write_log("Punctuation model requested but NeMo NLP extras are unavailable.", log_path)
+        return None
+    cached = _PUNCTUATION_MODELS.get(name)
+    if cached is not None:
+        return cached
+    try:
+        model = PunctuationCapitalizationModel.from_pretrained(name)
+    except Exception as exc:  # noqa: BLE001
+        write_log(f"Failed to load punctuation model {name}: {exc}", log_path)
+        return None
+    model = model.to(device)
+    model.eval()
+    _PUNCTUATION_MODELS[name] = model
+    write_log(f"Loaded punctuation model {name} on {device}", log_path)
+    return model
+
+
+def _configure_decoder_from_preset(
+    model: ASRModel,
+    preset: Dict[str, Any],
+    log_path: Path,
+    lm_override: str | None = None,
+    lexicon_override: str | None = None,
+    hotword_override: str | None = None,
+) -> None:
+    if OmegaConf is None:
+        raise RuntimeError("omegaconf is required to configure the decoder. Please install omegaconf.")
+
+    beam_size = int(preset.get("beam_size", 32))
+    beam_size_token = int(preset.get("beam_size_token", beam_size))
+    beam_threshold = float(preset.get("beam_threshold", 25.0))
+    lm_weight = float(preset.get("lm_weight", 2.0))
+    word_bonus = float(preset.get("word_insertion_bonus", 0.0))
+    silence_weight = float(preset.get("silence_weight", 0.0))
+    unknown_weight = float(preset.get("unk_weight", -10.0))
+
+    lm_path = _resolve_resource(lm_override or preset.get("lm_binary"))
+    lexicon_path = _resolve_resource(lexicon_override or preset.get("lexicon"))
+    hotword_path = _resolve_resource(hotword_override or preset.get("hotwords"))
+
+    if lm_path is None or not lm_path.exists():
+        raise FileNotFoundError(
+            "KenLM binary not found. Provide one via decoder preset or --lm-path override."
+        )
+    if lexicon_path is None or not lexicon_path.exists():
+        raise FileNotFoundError(
+            "Lexicon TSV not found. Provide one via decoder preset or --lexicon-path override."
+        )
+    if hotword_path is not None and not hotword_path.exists():
+        write_log(f"Hotword file {hotword_path} does not exist; continuing without boosts", log_path)
+        hotword_path = None
+
+    decoding_cfg = {
+        "strategy": "flashlight",
+        "beam": {
+            "search_type": "flashlight",
+            "beam_size": beam_size,
+            "beam_size_token": beam_size_token,
+            "beam_threshold": beam_threshold,
+            "kenlm_path": str(lm_path),
+            "beam_alpha": lm_weight,
+            "beam_beta": word_bonus,
+            "flashlight_cfg": {
+                "lexicon_path": str(lexicon_path),
+                "beam_size_token": beam_size_token,
+                "beam_threshold": beam_threshold,
+                "lm_weight": lm_weight,
+                "word_score": word_bonus,
+                "sil_weight": silence_weight,
+                "unk_weight": unknown_weight,
+            },
+        },
+    }
+
+    if hotword_path is not None:
+        decoding_cfg["beam"]["flashlight_cfg"]["boost_path"] = str(hotword_path)
+
+    # Allow presets to toggle timestamps from the decoder side
+    if "use_timestamps" in preset:
+        decoding_cfg["use_timestamps"] = bool(preset["use_timestamps"])
+
+    cfg = OmegaConf.create(decoding_cfg)
+    model.change_decoding_strategy(cfg)
+    write_log(
+        "Applied Flashlight decoder preset with KenLM={}, lexicon={}, hotwords={}".format(
+            lm_path, lexicon_path, hotword_path or "<none>"
+        ),
+        log_path,
+    )
 
 
 def resolve_input_device(keyword: str | None, explicit_index: int | None) -> int:
@@ -392,6 +571,14 @@ class ParakeetPTT:
             self.log_path,
         )
         self.model = self._load_model(args.model)
+        if args.disable_punctuation:
+            write_log("Punctuation post-processing disabled via flag", self.log_path)
+            self.punctuation_model = None
+        else:
+            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+            self.punctuation_model = _load_punctuation_model(args.punctuation_model, device, self.log_path)
+            if self.punctuation_model is None:
+                write_log("Continuing without punctuation post-processing", self.log_path)
         self.recorder = Recorder(args.sample_rate, self.device_index, self.log_path, args.rms_threshold, args.preamp)
         self.recording = False
         self.lock = threading.Lock()
@@ -405,6 +592,36 @@ class ParakeetPTT:
         write_log(f"Loading model {model_name} on {device}", self.log_path)
         model = ASRModel.from_pretrained(model_name=model_name, map_location=device)
         model.eval()
+        if self.args.disable_decoder_tuning:
+            write_log("Decoder tuning disabled; using model default decoding strategy", self.log_path)
+            return model
+
+        try:
+            presets = _load_decoder_presets(Path(self.args.decoder_config).expanduser())
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Unable to load decoder presets ({exc}); using default decoder", self.log_path)
+            return model
+
+        preset = presets.get(self.args.decoder_preset)
+        if preset is None:
+            write_log(
+                f"Decoder preset '{self.args.decoder_preset}' not found in {self.args.decoder_config}; using default decoder",
+                self.log_path,
+            )
+            return model
+
+        try:
+            _configure_decoder_from_preset(
+                model,
+                preset,
+                self.log_path,
+                lm_override=self.args.lm_path,
+                lexicon_override=self.args.lexicon_path,
+                hotword_override=self.args.hotword_path,
+            )
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Failed to apply Flashlight decoder preset: {exc}", self.log_path)
+        return model
         return model
 
     def start_recording(self):
@@ -448,6 +665,13 @@ class ParakeetPTT:
         else:
             text = str(hypotheses)
         text = text.strip()
+        if text and self.punctuation_model is not None:
+            try:
+                punctuated = self.punctuation_model.add_punctuation_capitalization([text])[0]
+                if punctuated:
+                    text = punctuated.strip()
+            except Exception as exc:  # noqa: BLE001
+                write_log(f"Failed to apply punctuation model: {exc}", self.log_path)
         if self.args.append_space and text:
             text += " "
         write_log(f"Recognized text: {text!r}", self.log_path)

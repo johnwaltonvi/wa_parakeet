@@ -10,3 +10,10 @@ logs/
 .env
 .vscode/
 .idea/
+
+# Keep raw hotword dumps (may contain real API keys) out of version control
+vocab.d/hotwords_raw.tsv
+
+# KenLM artifacts
+lm/*.binary
+lm/*.arpa
