@@ -11,6 +11,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -49,13 +50,70 @@ DEFAULT_DECODER_CONFIG = REPO_ROOT / "config" / "decoder_presets.yaml"
 DEFAULT_DECODER_PRESET = "live_fast"
 DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
 DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
-DEFAULT_EMOTION_THRESHOLD = 0.6
-EMOTION_EXCLAIM_LABELS = {"angry", "anger", "happy", "excited", "surprise", "surprised"}
+DEFAULT_EMOTION_THRESHOLD = 0.35
+EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
+EMOTION_CANONICAL_MAP = {
+    "ang": "angry",
+    "anger": "angry",
+    "angry": "angry",
+    "hap": "happy",
+    "happy": "happy",
+    "joy": "happy",
+    "excited": "excited",
+    "surprise": "surprised",
+    "surprised": "surprised",
+    "fru": "frustrated",
+    "frustrated": "frustrated",
+    "fea": "fearful",
+    "fear": "fearful",
+    "fearful": "fearful",
+    "sad": "sad",
+    "sorrow": "sad",
+    "neu": "neutral",
+    "neutral": "neutral",
+}
 
 
 _PUNCTUATION_MODELS: dict[str, PunctuationCapitalizationModel] = {}
 _EMOTION_MODELS: dict[str, Any] = {}
 
+
+def canonicalize_emotion_label(label: str) -> str:
+    key = label.strip().lower()
+    return EMOTION_CANONICAL_MAP.get(key, key)
+
+
+def ensure_speechbrain_wav2vec_shim() -> None:
+    target_pkg = "speechbrain.lobes.models.huggingface_transformers"
+    target_module = f"{target_pkg}.wav2vec2"
+    if target_module in sys.modules:
+        return
+    try:
+        from speechbrain.lobes.models import huggingface_wav2vec  # type: ignore[attr-defined]
+        import speechbrain.lobes.models as sb_models  # type: ignore[attr-defined]
+    except Exception:  # pragma: no cover - optional dependency
+        return
+
+    wav2vec_cls = getattr(huggingface_wav2vec, "HuggingFaceWav2Vec2", None)
+    if wav2vec_cls is None:
+        return
+
+    pkg_module = sys.modules.get(target_pkg)
+    if pkg_module is None:
+        pkg_module = types.ModuleType(target_pkg)
+        sys.modules[target_pkg] = pkg_module
+    if not hasattr(pkg_module, "__path__"):
+        pkg_module.__path__ = []  # type: ignore[attr-defined]
+
+    shim_module = types.ModuleType(target_module)
+    setattr(shim_module, "Wav2Vec2", wav2vec_cls)
+    sys.modules[target_module] = shim_module
+
+    setattr(pkg_module, "wav2vec2", shim_module)
+    if not hasattr(sb_models, "huggingface_transformers"):
+        setattr(sb_models, "huggingface_transformers", pkg_module)
+    if hasattr(sb_models, "__all__") and "huggingface_transformers" not in sb_models.__all__:
+        sb_models.__all__.append("huggingface_transformers")
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Parakeet push-to-talk dictation")
@@ -262,10 +320,11 @@ def _load_emotion_model(name: str, device: torch.device, log_path: Path) -> Opti
     if cached is not None:
         return cached
     device_str = str(device)
+    ensure_speechbrain_wav2vec_shim()
     try:
         classifier = foreign_class(
             source=name,
-            pymodule_file="custom_interface.py",
+            pymodule_file=str((REPO_ROOT / "speechbrain_modules" / "custom_interface.py").resolve()),
             classname="CustomEncoderWav2vec2Classifier",
             run_opts={"device": device_str},
         )
@@ -687,39 +746,88 @@ class ParakeetPTT:
         if self.emotion_model is None:
             return None
         try:
-            result = self.emotion_model.classify_file(str(audio_path))
+            raw = self.emotion_model.classify_file(str(audio_path))
         except Exception as exc:  # noqa: BLE001
             write_log(f"Emotion model inference failed: {exc}", self.log_path)
             return None
 
-        labels = result.get("labels") or result.get("classes")
-        scores = result.get("scores")
-        if scores is None or labels is None:
-            write_log("Emotion model returned unexpected output", self.log_path)
+        labels: Optional[list[str]] = None
+        raw_mapping: Dict[str, float] = {}
+
+        if isinstance(raw, dict):
+            labels = raw.get("labels") or raw.get("classes")
+            scores = raw.get("scores")
+            if isinstance(scores, torch.Tensor):
+                scores = scores.detach().cpu().tolist()
+            if isinstance(scores, (list, tuple)) and scores and isinstance(scores[0], (list, tuple)):
+                scores = scores[0]
+            if labels and isinstance(scores, (list, tuple)):
+                raw_mapping = {str(label): float(score) for label, score in zip(labels, scores)}
+        elif isinstance(raw, (tuple, list)) and len(raw) >= 4:
+            out_prob, score_tensor, _, text_lab = raw
+            if isinstance(out_prob, torch.Tensor):
+                probs_tensor = torch.softmax(out_prob, dim=-1) if out_prob.dim() > 1 else torch.softmax(out_prob.unsqueeze(0), dim=-1)
+                probs = probs_tensor.squeeze(0).detach().cpu().tolist()
+            else:
+                probs = out_prob
+            label_encoder = getattr(getattr(self.emotion_model, "hparams", None), "label_encoder", None)
+            decoded_labels: list[str] | None = None
+            if label_encoder is not None:
+                try:
+                    decoded = label_encoder.decode_ndim(list(range(len(probs))))
+                    decoded_labels = [str(item) for item in decoded]
+                except Exception:  # pragma: no cover - defensive fallback
+                    decoded_labels = None
+            if decoded_labels is None:
+                decoded_labels = [str(idx) for idx in range(len(probs))]
+            raw_mapping = {label: float(prob) for label, prob in zip(decoded_labels, probs)}
+
+        if not raw_mapping:
+            write_log("Emotion model returned unsupported format", self.log_path)
             return None
 
-        if isinstance(scores, torch.Tensor):
-            scores = scores.detach().cpu().tolist()
-        if isinstance(scores, (list, tuple)) and scores and isinstance(scores[0], (list, tuple)):
-            scores = scores[0]
+        canonical_scores: Dict[str, float] = {}
+        for raw_label, value in raw_mapping.items():
+            canonical = canonicalize_emotion_label(raw_label)
+            current = canonical_scores.get(canonical)
+            if current is None or value > current:
+                canonical_scores[canonical] = value
 
-        try:
-            mapping = {label: float(score) for label, score in zip(labels, scores)}
-        except Exception:  # pragma: no cover - defensive
-            write_log("Failed to map emotion scores", self.log_path)
+        if not canonical_scores:
+            write_log("Emotion model produced labels but none could be canonicalized", self.log_path)
             return None
 
-        if not mapping:
-            return None
+        label, score = max(canonical_scores.items(), key=lambda item: item[1])
+        raw_label = next((rl for rl, val in raw_mapping.items() if canonicalize_emotion_label(rl) == label and val == score), None)
+        if raw_label is None:
+            raw_label = next(iter(raw_mapping))
 
-        label, score = max(mapping.items(), key=lambda item: item[1])
-        info = {"label": label, "score": score, "scores": mapping}
+        info = {
+            "label": str(label),
+            "score": float(score),
+            "scores": canonical_scores,
+            "raw_label": str(raw_label),
+            "raw_scores": raw_mapping,
+        }
         self.last_emotion = info
-        write_log(f"Emotion detection: {label} ({score:.2f})", self.log_path)
+        if raw_label and raw_label != label:
+            write_log(
+                f"Emotion detection: {label} ({score:.2f}) [raw={raw_label}]",
+                self.log_path,
+            )
+        else:
+            write_log(f"Emotion detection: {label} ({score:.2f})", self.log_path)
+        if score < self.emotion_threshold:
+            ordered = sorted(canonical_scores.items(), key=lambda item: item[1], reverse=True)
+            summary = ", ".join(f"{lbl}:{val:.2f}" for lbl, val in ordered[:4])
+            write_log(
+                f"Emotion scores below threshold ({self.emotion_threshold:.2f}): {summary}",
+                self.log_path,
+            )
         return info
 
     def _apply_emotion_rules(self, text: str, info: Dict[str, Any]) -> tuple[str, Optional[str]]:
-        label = info.get("label", "").lower()
+        label = canonicalize_emotion_label(str(info.get("label", ""))).lower()
         score = float(info.get("score", 0.0))
         force_terminal: Optional[str] = None
 

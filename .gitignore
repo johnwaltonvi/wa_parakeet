@@ -17,3 +17,7 @@ vocab.d/hotwords_raw.tsv
 # KenLM artifacts
 lm/*.binary
 lm/*.arpa
+
+# SpeechBrain caches
+pretrained_models/
+wav2vec2_checkpoints/
