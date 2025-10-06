@@ -135,7 +135,9 @@ def _normalize_number_words(text: str) -> str:
 
     def replace(match: re.Match[str]) -> str:
         phrase = match.group(0)
-        tokens = [tok for tok in re.split(r"[\s-]+", phrase.lower()) if tok]
+        raw_tokens = [tok for tok in re.split(r"[\s-]+", phrase.lower()) if tok]
+        tokens = [re.sub(r"[^a-z]", "", tok) for tok in raw_tokens]
+        tokens = [tok for tok in tokens if tok]
         if not tokens:
             return phrase
         if not any(tok in _NUMBER_PRIMARY_WORDS for tok in tokens):
@@ -1029,6 +1031,8 @@ class ParakeetPTT:
         emotion_info = self._evaluate_emotion(audio_path)
         if emotion_info:
             text, force_terminal = self._apply_emotion_rules(text, emotion_info)
+        if self.normalize_numbers and text:
+            text = _normalize_number_words(text)
         if text and self.punctuation_model is not None:
             try:
                 punctuated = self.punctuation_model.add_punctuation_capitalization([text])[0]
