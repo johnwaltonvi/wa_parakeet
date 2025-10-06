@@ -360,6 +360,47 @@ def _normalize_slash_phrases(text: str) -> str:
 
 
 
+def _fix_trailing_artifacts(text: str, force_terminal: Optional[str]) -> str:
+    if not text:
+        return text
+
+    stripped = text.rstrip()
+    if stripped.endswith('/') and not force_terminal:
+        base = stripped[:-1].rstrip()
+        if base and '?' not in base:
+            tokens = re.findall(r"[A-Za-z']+", base.lower())
+            if tokens:
+                question_leads = {
+                    "who",
+                    "what",
+                    "when",
+                    "where",
+                    "why",
+                    "how",
+                    "do",
+                    "does",
+                    "did",
+                    "can",
+                    "could",
+                    "should",
+                    "would",
+                    "will",
+                    "is",
+                    "are",
+                    "am",
+                    "have",
+                    "has",
+                    "may",
+                    "might",
+                }
+                if tokens[0] in question_leads or tokens[-1] in {"who", "what", "where", "why", "how"}:
+                    suffix = text[len(stripped):]
+                    text = base + '?' + suffix
+    return text
+
+
+
+
 def _sanitize_token(token: str) -> str:
     return re.sub(r"[^a-z0-9]", "", token.lower())
 
@@ -1434,6 +1475,7 @@ class ParakeetPTT:
         if text:
             text = _normalize_ordinal_words(text)
             text = _normalize_slash_phrases(text)
+            text = _fix_trailing_artifacts(text, force_terminal)
         if force_terminal and text:
             stripped = text.rstrip()
             if not stripped.endswith(force_terminal):

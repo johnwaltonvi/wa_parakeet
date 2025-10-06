@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [Unreleased]
 
 - Added configurable acronym normalization (config/acronyms.yaml) with Codex CLI, API/APIs, GPU, and SQL defaults.
+- Converted trailing '/' endings into '?' when the sentence matches question heuristics.
 
 - Added optional LanguageTool grammar cleanup stage with CLI toggles and installer support.
 

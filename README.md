@@ -173,6 +173,7 @@ Update the vocab files as projects change; the listener reloads them on the next
 ## Grammar Cleanup
 - LanguageTool runs after the NeMo punctuation model to tidy sentence punctuation and basic grammar while respecting numeric normalization.
 - Ordinal words (e.g., 'twenty first') become digits with suffixes and spoken 'forward slash' collapses to '/'.
+- Trailing stray '/' at the end of a question normalizes to '?' when the sentence reads like a question.
 - Requires a local Java runtime (installed via `default-jre`) and the `language-tool-python` package; the installer prefetches the core resources for offline use.
 - Toggle with `--disable-grammar-cleanup` or switch locales via `--grammar-language en-GB`.
 - Corrections are logged to `push_to_talk.log` so you can audit changes if a sentence feels off.

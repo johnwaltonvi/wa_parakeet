@@ -11,3 +11,4 @@
 - [x] Prototype DTLN-based voice isolation pre-processing to feed cleaner audio into Parakeet (benchmark latency/quality)
 - [ ] Map SpeechBrain emotion detection scores to optional emoji insertions (e.g., 😀/😢) with confidence gating and opt-out flag
 - [ ] Add regression tests for grammar cleanup, ordinals, slash normalization
+- [ ] Investigate mid-sentence detection for optional trailing ellipsis/colon when dictation cuts off
