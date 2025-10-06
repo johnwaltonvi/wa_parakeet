@@ -55,7 +55,7 @@ DEFAULT_DECODER_PRESET = "live_fast"
 DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
 DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 DEFAULT_EMOTION_THRESHOLD = 0.35
-DEFAULT_VOICE_ISOLATION_MODEL = REPO_ROOT / "pretrained_models" / "dtln" / "model.onnx"
+DEFAULT_VOICE_ISOLATION_MODEL_DIR = REPO_ROOT / "pretrained_models" / "dtln"
 EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
 EMOTION_CANONICAL_MAP = {
     "ang": "angry",
@@ -333,9 +333,9 @@ def parse_args() -> argparse.Namespace:
         help="Disable the DTLN voice isolation preprocessor",
     )
     parser.add_argument(
-        "--voice-isolation-model",
-        default=str(DEFAULT_VOICE_ISOLATION_MODEL),
-        help="Path to the DTLN .h5 model used for voice isolation",
+        "--voice-isolation-model-dir",
+        default=str(DEFAULT_VOICE_ISOLATION_MODEL_DIR),
+        help="Directory containing DTLN ONNX models (model_1.onnx and model_2.onnx)",
     )
     return parser.parse_args()
 
@@ -857,9 +857,13 @@ class ParakeetPTT:
             write_log("Voice isolation disabled via flag", self.log_path)
         else:
             try:
-                self.voice_isolator = DtlnVoiceIsolation(Path(args.voice_isolation_model))
+                model_dir = Path(args.voice_isolation_model_dir)
+                self.voice_isolator = DtlnVoiceIsolation(
+                    model_dir / "model_1.onnx",
+                    model_dir / "model_2.onnx",
+                )
                 write_log(
-                    f"Voice isolation enabled with model {args.voice_isolation_model}",
+                    f"Voice isolation enabled with models from {args.voice_isolation_model_dir}",
                     self.log_path,
                 )
             except Exception as exc:  # noqa: BLE001
