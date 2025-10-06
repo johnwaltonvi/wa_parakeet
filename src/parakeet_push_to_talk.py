@@ -120,6 +120,18 @@ _NUMBER_PRIMARY_WORDS = {
 _NUMBER_CONNECTOR_WORDS = {"and"}
 _NUMBER_DECIMAL_WORDS = {"point"}
 _NUMBER_ALLOWED_WORDS = _NUMBER_PRIMARY_WORDS | _NUMBER_CONNECTOR_WORDS | _NUMBER_DECIMAL_WORDS
+_NUMBER_DIGIT_WORDS = {
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+}
 _NUMBER_WORD_PATTERN = re.compile(
     r"\b(?:" + "|".join(sorted(_NUMBER_ALLOWED_WORDS, key=len, reverse=True)) + r")(?:[\s-]+(?:"
     + "|".join(sorted(_NUMBER_ALLOWED_WORDS, key=len, reverse=True))
@@ -146,6 +158,14 @@ def _normalize_number_words(text: str) -> str:
         if not any(tok in _NUMBER_PRIMARY_WORDS for tok in tokens):
             return phrase
         normalized_phrase = " ".join(tokens)
+        if all(tok in _NUMBER_DIGIT_WORDS for tok in tokens):
+            converted_tokens = []
+            for tok in tokens:
+                try:
+                    converted_tokens.append(str(w2n.word_to_num(tok)))
+                except ValueError:
+                    return phrase
+            return " ".join(converted_tokens)
         had_point = "point" in tokens
         try:
             value = w2n.word_to_num(normalized_phrase)
