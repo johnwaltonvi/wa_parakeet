@@ -52,6 +52,10 @@ The script will:
 - Prefetch `nvidia/parakeet-tdt-1.1b` so first-run latency stays low.
 - Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/`, rewriting paths so it points at your clone.
 - Import `DISPLAY`/`XAUTHORITY` (when available), run `systemctl --user daemon-reload`, and enable+start the service.
+- Refresh `vocab.d/hotwords*.tsv` from `PARAKEET_HOTWORD_SOURCE` (defaults to `~/Documents/wise_apple`) and, when KenLM binaries (`lmplz`, `build_binary`) are present, rebuild `lm/programming_5gram.binary`.
+- Warn if required system tools (`ffmpeg`, `xdotool`, `libsndfile1`) are missing.
+
+Set `PARAKEET_HOTWORD_SOURCE=/path/to/repos` to scan a different corpus, or `PARAKEET_SKIP_HOTWORDS=1` to skip vocabulary/LM generation entirely.
 
 Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
 
