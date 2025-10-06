@@ -7,16 +7,31 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 ## Features
 - Right-Alt push-to-talk capture with silence timeout and preamp controls
 - NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting
+- DTLN voice isolation pre-processing for cleaner audio
+- Optional emotion detection (SpeechBrain wav2vec2 SER) to inject emphasis or emotion tags
+- Number word → digit conversion with ordinal handling and slash normalization
+- LanguageTool-powered grammar and punctuation cleanup with opt-out flag
+- Acronym formatting for Codex CLI, API/APIs, and domain terms
+- Text injection into the focused window via `xdotool`
+- Automatic muting of desktop audio while recording (disable with `--no-auto-mute`)
+- Helper scripts for local runs, service management, and model/decoder management
+- Optional user-level systemd unit with restart-on-failure semantics
+- DTLN voice isolation pre-processing for cleaner audio
+- Number word → digit conversion with ordinal handling and slash normalization
+- Acronym formatting for Codex CLI, API/APIs, and domain terms
+- Right-Alt push-to-talk capture with silence timeout and preamp controls
+- NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting
 - Optional emotion detection (SpeechBrain wav2vec2 SER) to inject emphasis or emotion tags
 - Text injection into the focused window via `xdotool`
 - Automatic muting of desktop audio while recording (disable with `--no-auto-mute`)
 - Helper scripts for local runs, service management, and model/decoder management
 - Optional user-level systemd unit with restart-on-failure semantics
+- LanguageTool-powered grammar and punctuation cleanup with opt-out flag
 
 ## Requirements
 - Linux desktop with X11 (tested on Pop!_OS / GNOME)
 - Python 3.10+ and `python3-venv`
-- System packages: `ffmpeg`, `xdotool`, `libsndfile1`
+- System packages: `ffmpeg`, `xdotool`, `libsndfile1`, `default-jre` (LanguageTool Java runtime)
 - GPU optional: CUDA accelerates inference but the script runs on CPU as well
 - Flashlight text decoder and KenLM binaries (build from source) for advanced beam-search support
 - NeMo NLP extras for punctuation/capitalization post-processing (`nemo-toolkit[asr,nlp]==2.4.1`)
@@ -55,6 +70,7 @@ The script will:
 - Install OS dependencies (`ffmpeg`, `xdotool`, `libsndfile1`) via `apt-get` when available.
 - Create `~/Documents/parakeet_corpus` (drop extra source text there), seed it with the curated `hotwords.tsv` and `lexicon.tsv`, and refresh `vocab.d/hotwords*.tsv` from both that folder and this repository.
 - Enable DTLN voice isolation automatically (uses `pretrained_models/dtln/model_*.onnx`) so noisy audio is cleaned before transcription.
+- Prefetch LanguageTool (en-US) grammar resources so cleanups run offline by default.
 - Rebuild `lm/programming_5gram.binary` when KenLM binaries (`lmplz`, `build_binary`) are present, falling back to repo sources if the corpus folder is empty.
 
 Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
@@ -153,6 +169,13 @@ Presets target two workflows out of the box:
 - `live_fast` – smaller beam tuned for interactive push-to-talk.
 
 Update the vocab files as projects change; the listener reloads them on the next start.
+
+## Grammar Cleanup
+- LanguageTool runs after the NeMo punctuation model to tidy sentence punctuation and basic grammar while respecting numeric normalization.
+- Ordinal words (e.g., 'twenty first') become digits with suffixes and spoken 'forward slash' collapses to '/'.
+- Requires a local Java runtime (installed via `default-jre`) and the `language-tool-python` package; the installer prefetches the core resources for offline use.
+- Toggle with `--disable-grammar-cleanup` or switch locales via `--grammar-language en-GB`.
+- Corrections are logged to `push_to_talk.log` so you can audit changes if a sentence feels off.
 
 ## Repository Layout
 ```

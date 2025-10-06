@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- Added optional LanguageTool grammar cleanup stage with CLI toggles and installer support.
+
 ## [2025-10-03] Auto-mute system audio during push-to-talk
 - Added an `AudioMuteController` that mutes desktop audio via `wpctl`/`pactl` while the recorder is active and restores the previous state afterward.
 - Introduced a `--no-auto-mute` flag for advanced users who prefer to manage audio manually.

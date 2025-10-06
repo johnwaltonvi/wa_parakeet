@@ -2,6 +2,7 @@
 """Parakeet push-to-talk dictation using a configurable hotkey."""
 import argparse
 import atexit
+import difflib
 import os
 import queue
 import re
@@ -44,6 +45,11 @@ try:
 except ImportError:  # pragma: no cover - handled at runtime
     OmegaConf = None
 
+try:
+    import language_tool_python
+except ImportError:  # pragma: no cover - handled at runtime
+    language_tool_python = None  # type: ignore[assignment]
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_LOG = Path.home() / ".cache" / "Parakeet" / "push_to_talk.log"
@@ -56,6 +62,7 @@ DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
 DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 DEFAULT_EMOTION_THRESHOLD = 0.35
 DEFAULT_VOICE_ISOLATION_MODEL_DIR = REPO_ROOT / "pretrained_models" / "dtln"
+DEFAULT_GRAMMAR_LANGUAGE = "en-US"
 EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
 EMOTION_CANONICAL_MAP = {
     "ang": "angry",
@@ -139,6 +146,71 @@ _NUMBER_WORD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_LANGUAGE_TOOLS: Dict[str, Any] = {}
+
+_ORDINAL_BASE_MAP = {
+    "first": "one",
+    "second": "two",
+    "third": "three",
+    "fourth": "four",
+    "fifth": "five",
+    "sixth": "six",
+    "seventh": "seven",
+    "eighth": "eight",
+    "ninth": "nine",
+    "tenth": "ten",
+    "eleventh": "eleven",
+    "twelfth": "twelve",
+    "thirteenth": "thirteen",
+    "fourteenth": "fourteen",
+    "fifteenth": "fifteen",
+    "sixteenth": "sixteen",
+    "seventeenth": "seventeen",
+    "eighteenth": "eighteen",
+    "nineteenth": "nineteen",
+    "twentieth": "twenty",
+    "thirtieth": "thirty",
+    "fortieth": "forty",
+    "fiftieth": "fifty",
+    "sixtieth": "sixty",
+    "seventieth": "seventy",
+    "eightieth": "eighty",
+    "ninetieth": "ninety",
+    "hundredth": "hundred",
+    "thousandth": "thousand",
+    "millionth": "million",
+    "billionth": "billion",
+    "trillionth": "trillion",
+    "zeroth": "zero",
+}
+
+_ORDINAL_ALLOWED_WORDS = _NUMBER_ALLOWED_WORDS | set(_ORDINAL_BASE_MAP.keys())
+_ORDINAL_WORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join(sorted(_ORDINAL_ALLOWED_WORDS, key=len, reverse=True)) + r")(?:[\s-]+(?:"
+    + "|".join(sorted(_ORDINAL_ALLOWED_WORDS, key=len, reverse=True))
+    + r"))*\b",
+    re.IGNORECASE,
+)
+
+_FORWARD_SLASH_PATTERN = re.compile(r"\bforward[\s,-]*(?:slash|slashes)\b", re.IGNORECASE)
+
+_CODEX_CLI_TARGETS = (
+    "codexcli",
+    "codexcly",
+    "codecscly",
+    "codecscli",
+    "codexkli",
+    "codexcl",
+)
+
+_CODEX_CLI_SPAN = re.compile(r"(?i)\bcod[a-z0-9]*\b(?:\s+\b[a-z0-9\.]+\b){0,2}")
+
+_ACRONYM_RULES: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"\bapis\b", re.IGNORECASE), "APIs"),
+    (re.compile(r"\bapi\b", re.IGNORECASE), "API"),
+]
+
+
 def canonicalize_emotion_label(label: str) -> str:
     key = label.strip().lower()
     return EMOTION_CANONICAL_MAP.get(key, key)
@@ -178,6 +250,81 @@ def _normalize_number_words(text: str) -> str:
         return str(value)
 
     return _NUMBER_WORD_PATTERN.sub(replace, text)
+
+
+
+
+def _load_language_tool(language: str, log_path: Path):
+    if language_tool_python is None:
+        write_log("language_tool_python not installed; grammar cleanup disabled.", log_path)
+        return None
+    cached = _LANGUAGE_TOOLS.get(language)
+    if cached is not None:
+        return cached
+    try:
+        tool = language_tool_python.LanguageTool(language)
+    except Exception as exc:  # noqa: BLE001
+        write_log(f"Failed to initialize LanguageTool for {language}: {exc}", log_path)
+        return None
+    _LANGUAGE_TOOLS[language] = tool
+    write_log(f"Loaded LanguageTool resources for {language}", log_path)
+    return tool
+
+
+def _ordinal_suffix(value: int) -> str:
+    value_abs = abs(value)
+    if 10 <= (value_abs % 100) <= 20:
+        return "th"
+    last_digit = value_abs % 10
+    if last_digit == 1:
+        return "st"
+    if last_digit == 2:
+        return "nd"
+    if last_digit == 3:
+        return "rd"
+    return "th"
+
+
+def _normalize_ordinal_words(text: str) -> str:
+    if not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        phrase = match.group(0)
+        tokens = [tok for tok in re.split(r"[\s-]+", phrase.lower()) if tok]
+        if not tokens:
+            return phrase
+        if not any(tok in _ORDINAL_BASE_MAP for tok in tokens):
+            return phrase
+        converted = [
+            re.sub(r"[^a-z]", "", _ORDINAL_BASE_MAP.get(tok, tok))
+            for tok in tokens
+        ]
+        converted = [tok for tok in converted if tok]
+        if not converted:
+            return phrase
+        normalized_phrase = " ".join(converted)
+        try:
+            value = w2n.word_to_num(normalized_phrase)
+        except ValueError:
+            return phrase
+        if isinstance(value, float):
+            if not value.is_integer():
+                return phrase
+            value = int(value)
+        suffix = _ordinal_suffix(int(value))
+        return f"{int(value)}{suffix}"
+
+    return _ORDINAL_WORD_PATTERN.sub(replace, text)
+
+
+def _normalize_slash_phrases(text: str) -> str:
+    if not text:
+        return text
+
+    replaced = _FORWARD_SLASH_PATTERN.sub("/", text)
+    replaced = re.sub(r"\s*/\s*", " / ", replaced)
+    return re.sub(r"\s{2,}", " ", replaced)
 
 
 def ensure_speechbrain_wav2vec_shim() -> None:
@@ -356,6 +503,16 @@ def parse_args() -> argparse.Namespace:
         "--voice-isolation-model-dir",
         default=str(DEFAULT_VOICE_ISOLATION_MODEL_DIR),
         help="Directory containing DTLN ONNX models (model_1.onnx and model_2.onnx)",
+    )
+    parser.add_argument(
+        "--disable-grammar-cleanup",
+        action="store_true",
+        help="Skip LanguageTool grammar and punctuation cleanup",
+    )
+    parser.add_argument(
+        "--grammar-language",
+        default=DEFAULT_GRAMMAR_LANGUAGE,
+        help="LanguageTool locale to use for grammar cleanup (default: en-US)",
     )
     return parser.parse_args()
 
@@ -889,6 +1046,16 @@ class ParakeetPTT:
             except Exception as exc:  # noqa: BLE001
                 self.voice_isolator = None
                 write_log(f"Failed to initialize voice isolation: {exc}", self.log_path)
+        self.grammar_language = args.grammar_language
+        self.grammar_tool = None
+        if args.disable_grammar_cleanup:
+            write_log("Grammar cleanup disabled via flag", self.log_path)
+        else:
+            tool = _load_language_tool(self.grammar_language, self.log_path)
+            if tool is None:
+                write_log("Continuing without grammar cleanup", self.log_path)
+            else:
+                self.grammar_tool = tool
         self.last_emotion: Optional[Dict[str, Any]] = None
         self.recorder = Recorder(args.sample_rate, self.device_index, self.log_path, args.rms_threshold, args.preamp)
         self.recording = False
@@ -1036,6 +1203,43 @@ class ParakeetPTT:
                     text += "!"
         return text, force_terminal
 
+
+    def _apply_grammar_cleanup(self, text: str) -> str:
+        if self.grammar_tool is None or language_tool_python is None:
+            return text
+        try:
+            matches = self.grammar_tool.check(text)
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Grammar cleanup failed (check): {exc}", self.log_path)
+            return text
+        if not matches:
+            return text
+        try:
+            corrected = language_tool_python.utils.correct(text, matches)
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Grammar cleanup failed (apply): {exc}", self.log_path)
+            return text
+        corrected = corrected.strip()
+        if corrected != text:
+            write_log(f"Grammar cleanup applied: {text!r} -> {corrected!r}", self.log_path)
+        return corrected
+
+    def _apply_acronym_formatting(self, text: str) -> str:
+        def replace_codex(match: re.Match[str]) -> str:
+            span = match.group(0)
+            sanitized = re.sub(r"[^a-z]", "", span.lower())
+            for target in _CODEX_CLI_TARGETS:
+                if difflib.SequenceMatcher(None, sanitized, target).ratio() >= 0.8:
+                    return "Codex CLI"
+            return span
+
+        updated = _CODEX_CLI_SPAN.sub(replace_codex, text)
+        for pattern, replacement in _ACRONYM_RULES:
+            updated = pattern.sub(replacement, updated)
+        if updated != text:
+            write_log(f"Acronym formatting applied: {text!r} -> {updated!r}", self.log_path)
+        return updated
+
     def start_recording(self):
         with self.lock:
             if self.recording:
@@ -1090,8 +1294,13 @@ class ParakeetPTT:
         emotion_info = self._evaluate_emotion(audio_path)
         if emotion_info:
             text, force_terminal = self._apply_emotion_rules(text, emotion_info)
+        if text:
+            text = _normalize_ordinal_words(text)
+            text = _normalize_slash_phrases(text)
         if self.normalize_numbers and text:
             text = _normalize_number_words(text)
+        if text:
+            text = self._apply_acronym_formatting(text)
         if text and self.punctuation_model is not None:
             try:
                 punctuated = self.punctuation_model.add_punctuation_capitalization([text])[0]
@@ -1099,6 +1308,11 @@ class ParakeetPTT:
                     text = punctuated.strip()
             except Exception as exc:  # noqa: BLE001
                 write_log(f"Failed to apply punctuation model: {exc}", self.log_path)
+        if text and self.grammar_tool is not None:
+            text = self._apply_grammar_cleanup(text)
+        if text:
+            text = _normalize_ordinal_words(text)
+            text = _normalize_slash_phrases(text)
         if force_terminal and text:
             stripped = text.rstrip()
             if not stripped.endswith(force_terminal):
@@ -1107,6 +1321,8 @@ class ParakeetPTT:
                 text = stripped
         if self.normalize_numbers and text:
             text = _normalize_number_words(text)
+        if text:
+            text = self._apply_acronym_formatting(text)
         if self.args.append_space and text:
             text += " "
         write_log(f"Recognized text: {text!r}", self.log_path)

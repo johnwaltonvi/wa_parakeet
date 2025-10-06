@@ -9,10 +9,11 @@ SERVICE_TEMPLATE="$ROOT_DIR/systemd/parakeet-ptt.service"
 SERVICE_PATH="$SERVICE_DIR/parakeet-ptt.service"
 MODEL_ID="nvidia/parakeet-tdt-1.1b"
 CORPUS_ROOT="$HOME/Documents/parakeet_corpus"
-SYSTEM_PACKAGES=(ffmpeg xdotool libsndfile1)
-COMMAND_CHECKS=(ffmpeg xdotool)
+SYSTEM_PACKAGES=(ffmpeg xdotool libsndfile1 default-jre)
+COMMAND_CHECKS=(ffmpeg xdotool java)
 DEFAULT_HOTWORDS_SRC="$ROOT_DIR/vocab.d/hotwords.tsv"
 DEFAULT_LEXICON_SRC="$ROOT_DIR/vocab.d/lexicon.tsv"
+GRAMMAR_LANGUAGE="en-US"
 
 step() {
   printf '\n==> %s\n' "$1"
@@ -85,6 +86,11 @@ python "$ROOT_DIR/scripts/download_model.py" --model "$MODEL_ID"
 
 if ! python -c "import soundfile" >/dev/null 2>&1; then
   echo "Warning: python package 'soundfile' failed to import. Ensure libsndfile1 is installed (e.g., 'sudo apt install libsndfile1')." >&2
+fi
+
+step "Prefetching LanguageTool resources ($GRAMMAR_LANGUAGE)"
+if ! python -m language_tool_python.download_lt >/dev/null 2>&1; then
+  echo "Warning: Failed to prefetch LanguageTool resources; grammar cleanup may attempt to download at runtime." >&2
 fi
 
 ensure_corpus_root
