@@ -4,6 +4,7 @@ import argparse
 import atexit
 import os
 import queue
+import re
 import shutil
 import signal
 import subprocess
@@ -29,6 +30,7 @@ try:
 except ImportError:  # pragma: no cover - optional dependency
     foreign_class = None  # type: ignore[assignment]
 from pynput import keyboard
+from word2number import w2n
 
 try:
     import yaml
@@ -77,9 +79,80 @@ EMOTION_CANONICAL_MAP = {
 _PUNCTUATION_MODELS: dict[str, PunctuationCapitalizationModel] = {}
 _EMOTION_MODELS: dict[str, Any] = {}
 
+_NUMBER_PRIMARY_WORDS = {
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+    "eleven",
+    "twelve",
+    "thirteen",
+    "fourteen",
+    "fifteen",
+    "sixteen",
+    "seventeen",
+    "eighteen",
+    "nineteen",
+    "twenty",
+    "thirty",
+    "forty",
+    "fifty",
+    "sixty",
+    "seventy",
+    "eighty",
+    "ninety",
+    "hundred",
+    "thousand",
+    "million",
+    "billion",
+    "trillion",
+}
+_NUMBER_CONNECTOR_WORDS = {"and"}
+_NUMBER_DECIMAL_WORDS = {"point"}
+_NUMBER_ALLOWED_WORDS = _NUMBER_PRIMARY_WORDS | _NUMBER_CONNECTOR_WORDS | _NUMBER_DECIMAL_WORDS
+_NUMBER_WORD_PATTERN = re.compile(
+    r"\b(?:" + "|".join(sorted(_NUMBER_ALLOWED_WORDS, key=len, reverse=True)) + r")(?:[\s-]+(?:"
+    + "|".join(sorted(_NUMBER_ALLOWED_WORDS, key=len, reverse=True))
+    + r"))*\b",
+    re.IGNORECASE,
+)
+
 def canonicalize_emotion_label(label: str) -> str:
     key = label.strip().lower()
     return EMOTION_CANONICAL_MAP.get(key, key)
+
+
+def _normalize_number_words(text: str) -> str:
+    if not text:
+        return text
+
+    def replace(match: re.Match[str]) -> str:
+        phrase = match.group(0)
+        tokens = [tok for tok in re.split(r"[\s-]+", phrase.lower()) if tok]
+        if not tokens:
+            return phrase
+        if not any(tok in _NUMBER_PRIMARY_WORDS for tok in tokens):
+            return phrase
+        normalized_phrase = " ".join(tokens)
+        had_point = "point" in tokens
+        try:
+            value = w2n.word_to_num(normalized_phrase)
+        except ValueError:
+            return phrase
+        if isinstance(value, float) and value.is_integer() and not had_point:
+            value = int(value)
+        if had_point and isinstance(value, int):
+            return f"{value}.0"
+        return str(value)
+
+    return _NUMBER_WORD_PATTERN.sub(replace, text)
 
 
 def ensure_speechbrain_wav2vec_shim() -> None:
@@ -243,6 +316,11 @@ def parse_args() -> argparse.Namespace:
         "--emotion-tag",
         action="store_true",
         help="Prefix transcripts with the dominant emotion label when above threshold",
+    )
+    parser.add_argument(
+        "--disable-number-normalization",
+        action="store_true",
+        help="Skip converting spoken number words (e.g., 'eight point zero') into digits",
     )
     return parser.parse_args()
 
@@ -756,6 +834,9 @@ class ParakeetPTT:
             self.emotion_model = _load_emotion_model(args.emotion_model, device, self.log_path)
         self.emotion_threshold = args.emotion_threshold
         self.emotion_tag = args.emotion_tag
+        self.normalize_numbers = not args.disable_number_normalization
+        if args.disable_number_normalization:
+            write_log("Number normalization disabled via flag", self.log_path)
         self.last_emotion: Optional[Dict[str, Any]] = None
         self.recorder = Recorder(args.sample_rate, self.device_index, self.log_path, args.rms_threshold, args.preamp)
         self.recording = False
@@ -961,6 +1042,8 @@ class ParakeetPTT:
                 stripped = stripped.rstrip(". ?!")
                 stripped += force_terminal
                 text = stripped
+        if self.normalize_numbers and text:
+            text = _normalize_number_words(text)
         if self.args.append_space and text:
             text += " "
         write_log(f"Recognized text: {text!r}", self.log_path)

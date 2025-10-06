@@ -8,3 +8,4 @@ numpy==1.26.4
 pynput==1.8.1
 omegaconf==2.3.0
 PyYAML==6.0.2
+word2number==1.1
