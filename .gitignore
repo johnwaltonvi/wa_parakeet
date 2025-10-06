@@ -22,5 +22,5 @@ lm/*.arpa
 pretrained_models/*
 !pretrained_models/dtln/
 pretrained_models/dtln/*
-!pretrained_models/dtln/model.h5
+!pretrained_models/dtln/model.onnx
 wav2vec2_checkpoints/

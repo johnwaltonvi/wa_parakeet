@@ -55,7 +55,7 @@ DEFAULT_DECODER_PRESET = "live_fast"
 DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
 DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 DEFAULT_EMOTION_THRESHOLD = 0.35
-DEFAULT_VOICE_ISOLATION_MODEL = REPO_ROOT / "pretrained_models" / "dtln" / "model.h5"
+DEFAULT_VOICE_ISOLATION_MODEL = REPO_ROOT / "pretrained_models" / "dtln" / "model.onnx"
 EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
 EMOTION_CANONICAL_MAP = {
     "ang": "angry",
