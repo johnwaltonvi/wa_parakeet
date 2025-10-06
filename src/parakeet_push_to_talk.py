@@ -77,7 +77,6 @@ EMOTION_CANONICAL_MAP = {
 _PUNCTUATION_MODELS: dict[str, PunctuationCapitalizationModel] = {}
 _EMOTION_MODELS: dict[str, Any] = {}
 
-
 def canonicalize_emotion_label(label: str) -> str:
     key = label.strip().lower()
     return EMOTION_CANONICAL_MAP.get(key, key)
@@ -248,6 +247,73 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def write_log(msg: str, log_path: Path) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{timestamp}] {msg}\n")
+
+
+def deliver_to_runelite(message: str, log_path: Path) -> bool:
+    message = message.strip()
+    if not message:
+        write_log("RuneLite delivery skipped because message was empty after trimming", log_path)
+        return False
+    try:
+        search_output = subprocess.check_output(["xdotool", "search", "--name", "RuneLite"], stderr=subprocess.DEVNULL)
+    except subprocess.CalledProcessError:
+        write_log("RuneLite window not found via xdotool search", log_path)
+        return False
+    window_ids = [line.strip() for line in search_output.decode().splitlines() if line.strip()]
+    if not window_ids:
+        write_log("RuneLite search returned no window IDs", log_path)
+        return False
+    target_window = window_ids[-1]
+    try:
+        previous_focus = subprocess.check_output(["xdotool", "getwindowfocus"], stderr=subprocess.DEVNULL).strip().decode()
+    except subprocess.CalledProcessError:
+        previous_focus = ""
+
+    subprocess.run(["xdotool", "windowactivate", "--sync", target_window], check=False)
+    time.sleep(0.12)
+
+    ydotool_bin = shutil.which("ydotool")
+    if ydotool_bin:
+        yd_success = True
+        for cmd in ([ydotool_bin, "type", message],):
+            result = subprocess.run(cmd, check=False)
+            if result.returncode != 0:
+                yd_success = False
+                break
+            time.sleep(0.05)
+        if yd_success:
+            if previous_focus and previous_focus != target_window:
+                subprocess.run(["xdotool", "windowactivate", "--sync", previous_focus], check=False)
+            write_log(f"RuneLite message typed via ydotool (manual confirmation required): {message!r}", log_path)
+            return True
+        write_log("ydotool delivery failed; falling back to xdotool", log_path)
+
+    subprocess.run(
+        [
+            "xdotool",
+            "type",
+            "--clearmodifiers",
+            "--delay",
+            "15",
+            "--window",
+            target_window,
+            "--",
+            message,
+        ],
+        check=False,
+    )
+    time.sleep(0.08)
+    if previous_focus and previous_focus != target_window:
+        subprocess.run(["xdotool", "windowactivate", "--sync", previous_focus], check=False)
+    write_log(f"RuneLite message typed via xdotool (manual confirmation required): {message!r}", log_path)
+    return True
+
+
 def ensure_single_instance(cookie_path: Path) -> None:
     if cookie_path.exists():
         try:
@@ -260,13 +326,6 @@ def ensure_single_instance(cookie_path: Path) -> None:
                 sys.exit(1)
     cookie_path.write_text(str(os.getpid()))
     atexit.register(lambda: cookie_path.unlink(missing_ok=True))
-
-
-def write_log(msg: str, log_path: Path) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(f"[{timestamp}] {msg}\n")
 
 
 def _load_decoder_presets(config_path: Path) -> Dict[str, Dict[str, Any]]:
@@ -910,6 +969,17 @@ class ParakeetPTT:
                 window_id = subprocess.check_output(["xdotool", "getwindowfocus"]).strip().decode()
             except subprocess.CalledProcessError:
                 window_id = ""
+            window_name = ""
+            if window_id:
+                try:
+                    window_name = (
+                        subprocess.check_output(["xdotool", "getwindowname", window_id]).strip().decode()
+                    )
+                except subprocess.CalledProcessError:
+                    window_name = ""
+            if window_name and "runelite" in window_name.lower():
+                if deliver_to_runelite(text, self.log_path):
+                    return
             cmd = [
                 "xdotool",
                 "type",

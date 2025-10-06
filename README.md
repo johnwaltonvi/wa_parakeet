@@ -38,14 +38,33 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
    ```
    Adjust source paths or pass `--input` if you maintain a curated corpus.
 
-## Quick Start
+## Turnkey Install
+Run the bundled installer to fetch dependencies, download the latest Parakeet model, and install the systemd unit under your user:
+
+```bash
+cd ~/wa_parakeet
+./install.sh
+```
+
+The script will:
+
+- Create/refresh the project virtual environment (`scripts/bootstrap.sh`).
+- Prefetch `nvidia/parakeet-tdt-1.1b` so first-run latency stays low.
+- Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/`, rewriting paths so it points at your clone.
+- Import `DISPLAY`/`XAUTHORITY` (when available), run `systemctl --user daemon-reload`, and enable+start the service.
+
+Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
+
+## Manual Quick Start
+Use these commands if you prefer to wire things up yourself or need to customise individual steps:
+
 ```bash
 # Clone or copy the repository, then bootstrap dependencies
 cd ~/wa_parakeet
 ./scripts/bootstrap.sh
 
-# (Optional) Prefetch the model so the first run is faster
-./scripts/download_model.py
+# Prefetch the default model so the first run is faster
+./scripts/download_model.py --model nvidia/parakeet-tdt-1.1b
 
 # (Recommended) Build vocab + LM assets (adjust source path to your repos)
 ./scripts/refresh_hotwords.py ~/Documents/wise_apple
@@ -67,7 +86,7 @@ By default the script uses the system default capture device. Override selection
 List available devices with `python -m sounddevice` after activating the virtual environment.
 
 ## Systemd Integration
-1. Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/` and adjust `WorkingDirectory` if the clone lives elsewhere.
+1. Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/` and adjust `WorkingDirectory` if the clone lives elsewhere. (The `install.sh` script performs this rewrite automatically.)
 2. Ensure the unit has access to your X session. Either set static values inside the service (e.g., `Environment=DISPLAY=:1` and `Environment=XAUTHORITY=%h/.Xauthority`) or import the live environment after login:
    ```bash
    systemctl --user import-environment DISPLAY XAUTHORITY

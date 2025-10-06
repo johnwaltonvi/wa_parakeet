@@ -11,7 +11,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Download a NeMo ASR model into the local cache")
     parser.add_argument(
         "--model",
-        default="nvidia/parakeet-tdt-0.6b-v2",
+        default="nvidia/parakeet-tdt-1.1b",
         help="Model identifier to download",
     )
     args = parser.parse_args()
