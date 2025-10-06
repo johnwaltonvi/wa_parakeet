@@ -32,6 +32,7 @@ except ImportError:  # pragma: no cover - optional dependency
     foreign_class = None  # type: ignore[assignment]
 from pynput import keyboard
 from word2number import w2n
+from dataclasses import dataclass
 
 from voice_isolation import DtlnVoiceIsolation
 
@@ -63,6 +64,7 @@ DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 DEFAULT_EMOTION_THRESHOLD = 0.35
 DEFAULT_VOICE_ISOLATION_MODEL_DIR = REPO_ROOT / "pretrained_models" / "dtln"
 DEFAULT_GRAMMAR_LANGUAGE = "en-US"
+DEFAULT_ACRONYM_CONFIG = REPO_ROOT / "config" / "acronyms.yaml"
 EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
 EMOTION_CANONICAL_MAP = {
     "ang": "angry",
@@ -194,20 +196,49 @@ _ORDINAL_WORD_PATTERN = re.compile(
 
 _FORWARD_SLASH_PATTERN = re.compile(r"\bforward[\s,-]*(?:slash|slashes)\b", re.IGNORECASE)
 
-_CODEX_CLI_TARGETS = (
-    "codexcli",
-    "codexcly",
-    "codecscly",
-    "codecscli",
-    "codexkli",
-    "codexcl",
-)
+_FUZZY_SPAN_PATTERN = re.compile(r"[A-Za-z][A-Za-z0-9'\-\s]{1,40}")
 
-_CODEX_CLI_SPAN = re.compile(r"(?i)\bcod[a-z0-9]*\b(?:\s+\b[a-z0-9\.]+\b){0,2}")
 
-_ACRONYM_RULES: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bapis\b", re.IGNORECASE), "APIs"),
-    (re.compile(r"\bapi\b", re.IGNORECASE), "API"),
+@dataclass
+class AcronymRule:
+    canonical: str
+    patterns: list[re.Pattern[str]]
+    fuzzy_stems: tuple[str, ...] = ()
+    fuzzy_threshold: float = 0.82
+
+
+_DEFAULT_ACRONYM_ENTRIES: list[dict[str, Any]] = [
+    {
+        "canonical": "Codex CLI",
+        "aliases": [
+            "codex cli",
+            "codexcli",
+            "codexcly",
+            "codecscly",
+            "codex kli",
+            "codex*cli",
+        ],
+        "fuzzy_stems": ["codexcli", "codexcly", "codecly", "codexcl"],
+        "fuzzy_threshold": 0.8,
+    },
+    {
+        "canonical": "Codex CLI's",
+        "aliases": [
+            "codex cli's",
+            "codexcli's",
+            "codexcly's",
+            "codex*cli's",
+        ],
+        "fuzzy_stems": ["codexclis", "codexclis"],
+        "fuzzy_threshold": 0.78,
+    },
+    {"canonical": "API", "aliases": ["api"]},
+    {"canonical": "APIs", "aliases": ["apis"]},
+    {"canonical": "CLI", "aliases": ["cli"]},
+    {"canonical": "CLIs", "aliases": ["clis"]},
+    {"canonical": "GPU", "aliases": ["gpu"]},
+    {"canonical": "GPUs", "aliases": ["gpus"]},
+    {"canonical": "SQL", "aliases": ["sql"]},
 ]
 
 
@@ -326,6 +357,70 @@ def _normalize_slash_phrases(text: str) -> str:
     replaced = re.sub(r"\s*/\s*", " / ", replaced)
     return re.sub(r"\s{2,}", " ", replaced)
 
+
+
+
+def _sanitize_token(token: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", token.lower())
+
+
+def _compile_acronym_pattern(alias: str) -> re.Pattern[str]:
+    alias = alias.strip()
+    if not alias:
+        raise ValueError("Acronym alias may not be empty")
+    escaped = re.escape(alias)
+    escaped = escaped.replace(r"\ ", r"\s+")
+    escaped = escaped.replace(r"\*", r"[A-Za-z0-9]*")
+    pattern = rf"(?i)(?<!\w){escaped}(?!\w)"
+    return re.compile(pattern)
+
+
+def _load_acronym_rules(config_path: Path, log_path: Path) -> list[AcronymRule]:
+    entries: list[dict[str, Any]] = []
+    if yaml is not None and config_path.exists():
+        try:
+            data = yaml.safe_load(config_path.read_text())
+            if isinstance(data, dict):
+                entries = data.get("acronyms", []) or []
+            else:
+                write_log(f"Acronym config {config_path} must define a top-level mapping", log_path)
+        except Exception as exc:  # noqa: BLE001
+            write_log(f"Failed to parse acronym config {config_path}: {exc}", log_path)
+    if not entries:
+        entries = _DEFAULT_ACRONYM_ENTRIES
+        write_log(
+            f"Using built-in acronym defaults (config missing or empty at {config_path})",
+            log_path,
+        )
+
+    rules: list[AcronymRule] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        canonical = str(entry.get("canonical", "")).strip()
+        if not canonical:
+            continue
+        aliases = entry.get("aliases", []) or []
+        patterns: list[re.Pattern[str]] = []
+        for alias in aliases:
+            try:
+                patterns.append(_compile_acronym_pattern(str(alias)))
+            except ValueError:
+                write_log(f"Ignoring empty alias for acronym {canonical}", log_path)
+        fuzzy_sources = entry.get("fuzzy_stems", []) or []
+        fuzzy_stems = tuple(_sanitize_token(str(src)) for src in fuzzy_sources if str(src).strip())
+        threshold = float(entry.get("fuzzy_threshold", 0.82))
+        if not patterns and not fuzzy_stems:
+            continue
+        rules.append(
+            AcronymRule(
+                canonical=canonical,
+                patterns=patterns,
+                fuzzy_stems=fuzzy_stems,
+                fuzzy_threshold=threshold,
+            )
+        )
+    return rules
 
 def ensure_speechbrain_wav2vec_shim() -> None:
     target_pkg = "speechbrain.lobes.models.huggingface_transformers"
@@ -513,6 +608,11 @@ def parse_args() -> argparse.Namespace:
         "--grammar-language",
         default=DEFAULT_GRAMMAR_LANGUAGE,
         help="LanguageTool locale to use for grammar cleanup (default: en-US)",
+    )
+    parser.add_argument(
+        "--acronym-config",
+        default=str(DEFAULT_ACRONYM_CONFIG),
+        help="YAML file defining custom acronym normalization rules",
     )
     return parser.parse_args()
 
@@ -1065,6 +1165,9 @@ class ParakeetPTT:
         if not args.auto_mute:
             write_log("Auto-mute disabled via CLI flag", self.log_path)
 
+        acronym_config = Path(args.acronym_config).expanduser()
+        self.acronym_rules = _load_acronym_rules(acronym_config, self.log_path)
+
     def _load_model(self, model_name: str) -> ASRModel:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         write_log(f"Loading model {model_name} on {device}", self.log_path)
@@ -1224,20 +1327,38 @@ class ParakeetPTT:
             write_log(f"Grammar cleanup applied: {text!r} -> {corrected!r}", self.log_path)
         return corrected
 
-    def _apply_acronym_formatting(self, text: str) -> str:
-        def replace_codex(match: re.Match[str]) -> str:
-            span = match.group(0)
-            sanitized = re.sub(r"[^a-z]", "", span.lower())
-            for target in _CODEX_CLI_TARGETS:
-                if difflib.SequenceMatcher(None, sanitized, target).ratio() >= 0.8:
-                    return "Codex CLI"
-            return span
 
-        updated = _CODEX_CLI_SPAN.sub(replace_codex, text)
-        for pattern, replacement in _ACRONYM_RULES:
-            updated = pattern.sub(replacement, updated)
+    def _apply_acronym_formatting(self, text: str) -> str:
+        if not getattr(self, "acronym_rules", None):
+            return text
+
+        updated = text
+
+        for rule in self.acronym_rules:
+            for pattern in rule.patterns:
+                updated = pattern.sub(rule.canonical, updated)
+
+            if rule.fuzzy_stems:
+                def fuzzy_replace(match: re.Match[str]) -> str:
+                    phrase = match.group(0)
+                    sanitized = _sanitize_token(phrase)
+                    canonical_norm = _sanitize_token(rule.canonical)
+                    if not sanitized or sanitized == canonical_norm:
+                        return phrase
+                    for stem in rule.fuzzy_stems:
+                        if not stem:
+                            continue
+                        ratio = difflib.SequenceMatcher(None, sanitized, stem).ratio()
+                        if ratio >= rule.fuzzy_threshold:
+                            return rule.canonical
+                    return phrase
+
+                updated = _FUZZY_SPAN_PATTERN.sub(fuzzy_replace, updated)
+
         if updated != text:
-            write_log(f"Acronym formatting applied: {text!r} -> {updated!r}", self.log_path)
+            old_preview = text if len(text) <= 120 else text[:117] + '...'
+            new_preview = updated if len(updated) <= 120 else updated[:117] + '...'
+            write_log(f"Acronym formatting applied: {old_preview!r} -> {new_preview!r}", self.log_path)
         return updated
 
     def start_recording(self):

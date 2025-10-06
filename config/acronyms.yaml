@@ -1,0 +1,38 @@
+acronyms:
+  - canonical: "Codex CLI"
+    aliases:
+      - "codex cli"
+      - "codexcli"
+      - "codexcly"
+      - "codecscly"
+      - "codex kli"
+      - "codex*cli"
+    fuzzy_stems:
+      - "codexcli"
+      - "codexcly"
+      - "codecly"
+      - "codexcl"
+    fuzzy_threshold: 0.8
+  - canonical: "Codex CLI's"
+    aliases:
+      - "codex cli's"
+      - "codexcli's"
+      - "codexcly's"
+      - "codex*cli's"
+    fuzzy_stems:
+      - "codexclis"
+    fuzzy_threshold: 0.78
+  - canonical: "API"
+    aliases: ["api"]
+  - canonical: "APIs"
+    aliases: ["apis"]
+  - canonical: "CLI"
+    aliases: ["cli"]
+  - canonical: "CLIs"
+    aliases: ["clis"]
+  - canonical: "GPU"
+    aliases: ["gpu"]
+  - canonical: "GPUs"
+    aliases: ["gpus"]
+  - canonical: "SQL"
+    aliases: ["sql"]

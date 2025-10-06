@@ -177,6 +177,12 @@ Update the vocab files as projects change; the listener reloads them on the next
 - Toggle with `--disable-grammar-cleanup` or switch locales via `--grammar-language en-GB`.
 - Corrections are logged to `push_to_talk.log` so you can audit changes if a sentence feels off.
 
+## Acronym Normalization
+- `config/acronyms.yaml` defines case-safe replacements (Codex CLI, API/APIs, GPU/GPUs, SQL, etc.).
+- Update the YAML to add new entries; the listener reloads them on restart.
+- Use `--acronym-config /path/to/file.yaml` to point at a custom set for your environment.
+  - Quick smoke test: "Codex CLI handles deployments", "install APIs today", "query SQL reports".
+
 ## Repository Layout
 ```
 wa_parakeet/
