@@ -53,7 +53,7 @@ The script will:
 - Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/`, rewriting paths so it points at your clone.
 - Import `DISPLAY`/`XAUTHORITY` (when available), run `systemctl --user daemon-reload`, and enable+start the service.
 - Install OS dependencies (`ffmpeg`, `xdotool`, `libsndfile1`) via `apt-get` when available.
-- Create `~/Documents/parakeet_corpus` (drop extra source text there) and refresh `vocab.d/hotwords*.tsv` from both that folder and this repository.
+- Create `~/Documents/parakeet_corpus` (drop extra source text there), seed it with the curated `hotwords.tsv` and `lexicon.tsv`, and refresh `vocab.d/hotwords*.tsv` from both that folder and this repository.
 - Rebuild `lm/programming_5gram.binary` when KenLM binaries (`lmplz`, `build_binary`) are present, falling back to repo sources if the corpus folder is empty.
 
 Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
@@ -70,6 +70,8 @@ cd ~/wa_parakeet
 ./scripts/download_model.py --model nvidia/parakeet-tdt-1.1b
 
 # (Recommended) Build vocab + LM assets (adjust source path to your repos)
+cp vocab.d/hotwords.tsv ~/Documents/parakeet_corpus/hotwords.tsv
+cp vocab.d/lexicon.tsv ~/Documents/parakeet_corpus/lexicon.tsv
 ./scripts/refresh_hotwords.py ~/wa_parakeet ~/Documents/parakeet_corpus
 ./scripts/curate_hotwords.py --limit 500
 ./scripts/build_kenlm.py --source ~/Documents/parakeet_corpus --output lm/programming_5gram.binary

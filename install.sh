@@ -11,6 +11,8 @@ MODEL_ID="nvidia/parakeet-tdt-1.1b"
 CORPUS_ROOT="$HOME/Documents/parakeet_corpus"
 SYSTEM_PACKAGES=(ffmpeg xdotool libsndfile1)
 COMMAND_CHECKS=(ffmpeg xdotool)
+DEFAULT_HOTWORDS_SRC="$ROOT_DIR/vocab.d/hotwords.tsv"
+DEFAULT_LEXICON_SRC="$ROOT_DIR/vocab.d/lexicon.tsv"
 
 step() {
   printf '\n==> %s\n' "$1"
@@ -52,6 +54,17 @@ has_corpus_files() {
   find "$1" -type f -print -quit | grep -q .
 }
 
+seed_default_vocab() {
+  if [ -f "$DEFAULT_HOTWORDS_SRC" ] && [ ! -f "$CORPUS_ROOT/hotwords.tsv" ]; then
+    step "Seeding default hotwords into $CORPUS_ROOT/hotwords.tsv"
+    install -m 644 "$DEFAULT_HOTWORDS_SRC" "$CORPUS_ROOT/hotwords.tsv"
+  fi
+  if [ -f "$DEFAULT_LEXICON_SRC" ] && [ ! -f "$CORPUS_ROOT/lexicon.tsv" ]; then
+    step "Seeding default lexicon into $CORPUS_ROOT/lexicon.tsv"
+    install -m 644 "$DEFAULT_LEXICON_SRC" "$CORPUS_ROOT/lexicon.tsv"
+  fi
+}
+
 step "Checking prerequisites"
 require_cmd python3
 require_cmd systemctl
@@ -75,6 +88,7 @@ if ! python -c "import soundfile" >/dev/null 2>&1; then
 fi
 
 ensure_corpus_root
+seed_default_vocab
 
 HOTWORD_SOURCES=("$ROOT_DIR")
 if has_corpus_files "$CORPUS_ROOT"; then

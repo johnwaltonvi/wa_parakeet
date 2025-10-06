@@ -8,4 +8,4 @@
 - [ ] Add post-processing pass to normalize spoken numbers into digits (e.g., "redis eight" -> "redis 8") with minimal configuration
 - [ ] Implement acronym detection to enforce uppercase formatting and optional dotted forms (e.g., "s. q. l." variants)
 - [ ] Explore optional syntax cleanup that collapses repeated punctuation (",," "+!" etc.) without altering intended wording; evaluate grammar toggles separately
-- [ ] Evaluate GPU-friendly voice isolation pre-processing (e.g., ClearerVoice-Studio, DTLN) to feed cleaner audio into Parakeet
+- [ ] Prototype DTLN-based voice isolation pre-processing to feed cleaner audio into Parakeet (benchmark latency/quality)
