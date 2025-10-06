@@ -54,6 +54,7 @@ The script will:
 - Import `DISPLAY`/`XAUTHORITY` (when available), run `systemctl --user daemon-reload`, and enable+start the service.
 - Install OS dependencies (`ffmpeg`, `xdotool`, `libsndfile1`) via `apt-get` when available.
 - Create `~/Documents/parakeet_corpus` (drop extra source text there), seed it with the curated `hotwords.tsv` and `lexicon.tsv`, and refresh `vocab.d/hotwords*.tsv` from both that folder and this repository.
+- Enable DTLN voice isolation automatically (uses `pretrained_models/dtln/model.h5`) so noisy audio is cleaned before transcription.
 - Rebuild `lm/programming_5gram.binary` when KenLM binaries (`lmplz`, `build_binary`) are present, falling back to repo sources if the corpus folder is empty.
 
 Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
@@ -78,6 +79,8 @@ cp vocab.d/lexicon.tsv ~/Documents/parakeet_corpus/lexicon.tsv
 
 # Launch manually
 ./scripts/parakeet-ptt --append-space --allow-esc
+# Disable voice isolation if you prefer the raw input audio
+# ./scripts/parakeet-ptt --disable-voice-isolation
 ```
 
 The listener logs to `~/.cache/Parakeet/push_to_talk.log` and stores a PID cookie at `/tmp/parakeet-ptt.pid` to prevent duplicate launches.

@@ -19,5 +19,8 @@ lm/*.binary
 lm/*.arpa
 
 # SpeechBrain caches
-pretrained_models/
+pretrained_models/*
+!pretrained_models/dtln/
+pretrained_models/dtln/*
+!pretrained_models/dtln/model.h5
 wav2vec2_checkpoints/

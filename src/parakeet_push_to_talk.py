@@ -32,6 +32,8 @@ except ImportError:  # pragma: no cover - optional dependency
 from pynput import keyboard
 from word2number import w2n
 
+from voice_isolation import DtlnVoiceIsolation
+
 try:
     import yaml
 except ImportError:  # pragma: no cover - handled at runtime
@@ -53,6 +55,7 @@ DEFAULT_DECODER_PRESET = "live_fast"
 DEFAULT_PUNCTUATION_MODEL = "punctuation_en_bert"
 DEFAULT_EMOTION_MODEL = "speechbrain/emotion-recognition-wav2vec2-IEMOCAP"
 DEFAULT_EMOTION_THRESHOLD = 0.35
+DEFAULT_VOICE_ISOLATION_MODEL = REPO_ROOT / "pretrained_models" / "dtln" / "model.h5"
 EMOTION_EXCLAIM_LABELS = {"angry", "happy", "excited", "surprised", "frustrated", "fearful"}
 EMOTION_CANONICAL_MAP = {
     "ang": "angry",
@@ -323,6 +326,16 @@ def parse_args() -> argparse.Namespace:
         "--disable-number-normalization",
         action="store_true",
         help="Skip converting spoken number words (e.g., 'eight point zero') into digits",
+    )
+    parser.add_argument(
+        "--disable-voice-isolation",
+        action="store_true",
+        help="Disable the DTLN voice isolation preprocessor",
+    )
+    parser.add_argument(
+        "--voice-isolation-model",
+        default=str(DEFAULT_VOICE_ISOLATION_MODEL),
+        help="Path to the DTLN .h5 model used for voice isolation",
     )
     return parser.parse_args()
 
@@ -839,6 +852,19 @@ class ParakeetPTT:
         self.normalize_numbers = not args.disable_number_normalization
         if args.disable_number_normalization:
             write_log("Number normalization disabled via flag", self.log_path)
+        if args.disable_voice_isolation:
+            self.voice_isolator = None
+            write_log("Voice isolation disabled via flag", self.log_path)
+        else:
+            try:
+                self.voice_isolator = DtlnVoiceIsolation(Path(args.voice_isolation_model))
+                write_log(
+                    f"Voice isolation enabled with model {args.voice_isolation_model}",
+                    self.log_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                self.voice_isolator = None
+                write_log(f"Failed to initialize voice isolation: {exc}", self.log_path)
         self.last_emotion: Optional[Dict[str, Any]] = None
         self.recorder = Recorder(args.sample_rate, self.device_index, self.log_path, args.rms_threshold, args.preamp)
         self.recording = False
@@ -1018,6 +1044,15 @@ class ParakeetPTT:
         write_log(f"Transcribing {audio_path}", self.log_path)
         time.sleep(0.15)
 
+        denoised_path: Optional[Path] = None
+        if self.voice_isolator is not None:
+            try:
+                denoised_path = self.voice_isolator.process_file(audio_path)
+                audio_path = denoised_path
+                write_log("Applied DTLN voice isolation", self.log_path)
+            except Exception as exc:  # noqa: BLE001
+                write_log(f"Voice isolation failed: {exc}", self.log_path)
+
         with torch.inference_mode():
             hypotheses = self.model.transcribe(audio=[str(audio_path)], batch_size=1, return_hypotheses=True)
         text = ""
@@ -1078,6 +1113,11 @@ class ParakeetPTT:
                 cmd.extend(["--window", window_id])
             cmd.extend(["--", text])
             subprocess.run(cmd, check=False)
+        if denoised_path is not None:
+            try:
+                denoised_path.unlink(missing_ok=True)
+            except OSError:
+                pass
 
     def run(self):
         def on_press(key):
