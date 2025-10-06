@@ -9,7 +9,7 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting
 - DTLN voice isolation pre-processing for cleaner audio
 - Optional emotion detection (SpeechBrain wav2vec2 SER) to inject emphasis or emotion tags
-- Number word → digit conversion with ordinal handling and slash normalization
+- Number word → digit conversion with ordinal handling, slash cleanup, and heuristics to skip pronoun phrases ("that one")
 - LanguageTool-powered grammar and punctuation cleanup with opt-out flag
 - Acronym formatting for Codex CLI, API/APIs, and domain terms
 - Text injection into the focused window via `xdotool`
@@ -17,7 +17,7 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - Helper scripts for local runs, service management, and model/decoder management
 - Optional user-level systemd unit with restart-on-failure semantics
 - DTLN voice isolation pre-processing for cleaner audio
-- Number word → digit conversion with ordinal handling and slash normalization
+- Number word → digit conversion with ordinal handling, slash cleanup, and heuristics to skip pronoun phrases ("that one")
 - Acronym formatting for Codex CLI, API/APIs, and domain terms
 - Right-Alt push-to-talk capture with silence timeout and preamp controls
 - NVIDIA NeMo Parakeet-TDT-1.1B transcription with optional Flashlight beam search, KenLM fusion, and hotword boosting

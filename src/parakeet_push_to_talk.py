@@ -148,6 +148,40 @@ _NUMBER_WORD_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+_NUMBER_SINGLE_SKIP_PRECEDERS = {
+    "a",
+    "an",
+    "the",
+    "this",
+    "that",
+    "these",
+    "those",
+    "another",
+    "each",
+    "every",
+    "some",
+    "any",
+    "no",
+    "my",
+    "your",
+    "our",
+    "their",
+    "his",
+    "her",
+    "its",
+    "whose",
+    "which",
+}
+
+_NUMBER_SINGLE_SKIP_FOLLOWERS = {
+    "just",
+    "like",
+    "also",
+    "too",
+    "either",
+    "neither",
+}
+
 _LANGUAGE_TOOLS: Dict[str, Any] = {}
 
 _ORDINAL_BASE_MAP = {
@@ -251,6 +285,8 @@ def _normalize_number_words(text: str) -> str:
     if not text:
         return text
 
+    original_text = text
+
     def replace(match: re.Match[str]) -> str:
         phrase = match.group(0)
         raw_tokens = [tok for tok in re.split(r"[\s-]+", phrase.lower()) if tok]
@@ -260,6 +296,16 @@ def _normalize_number_words(text: str) -> str:
             return phrase
         if not any(tok in _NUMBER_PRIMARY_WORDS for tok in tokens):
             return phrase
+
+        start, end = match.span()
+        if len(tokens) == 1 and tokens[0] in _NUMBER_DIGIT_WORDS:
+            prev_tokens = re.findall(r"[A-Za-z']+", original_text[:start])
+            next_match = re.search(r"[A-Za-z']+", original_text[end:])
+            prev_word = prev_tokens[-1].lower() if prev_tokens else ""
+            next_word = next_match.group(0).lower() if next_match else ""
+            if prev_word in _NUMBER_SINGLE_SKIP_PRECEDERS or next_word in _NUMBER_SINGLE_SKIP_FOLLOWERS:
+                return phrase
+
         normalized_phrase = " ".join(tokens)
         if all(tok in _NUMBER_DIGIT_WORDS for tok in tokens):
             converted_tokens = []
