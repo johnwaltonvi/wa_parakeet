@@ -32,11 +32,11 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
    ```
 4. Use the helper scripts in this repo to generate resources:
    ```bash
-   ./scripts/refresh_hotwords.py ~/Documents/wise_apple
+   ./scripts/refresh_hotwords.py ~/wa_parakeet ~/Documents/parakeet_corpus
    ./scripts/curate_hotwords.py --limit 500
-   ./scripts/build_kenlm.py --source ~/Documents/wise_apple --output lm/programming_5gram.binary
+   ./scripts/build_kenlm.py --source ~/Documents/parakeet_corpus --output lm/programming_5gram.binary
    ```
-   Adjust source paths or pass `--input` if you maintain a curated corpus.
+   Adjust source paths or pass `--input` if you maintain a curated corpus. If the corpus folder is empty the build step can instead point at `~/wa_parakeet`.
 
 ## Turnkey Install
 Run the bundled installer to fetch dependencies, download the latest Parakeet model, and install the systemd unit under your user:
@@ -52,10 +52,9 @@ The script will:
 - Prefetch `nvidia/parakeet-tdt-1.1b` so first-run latency stays low.
 - Copy `systemd/parakeet-ptt.service` to `~/.config/systemd/user/`, rewriting paths so it points at your clone.
 - Import `DISPLAY`/`XAUTHORITY` (when available), run `systemctl --user daemon-reload`, and enable+start the service.
-- Refresh `vocab.d/hotwords*.tsv` from `PARAKEET_HOTWORD_SOURCE` (defaults to `~/Documents/wise_apple`) and, when KenLM binaries (`lmplz`, `build_binary`) are present, rebuild `lm/programming_5gram.binary`.
-- Warn if required system tools (`ffmpeg`, `xdotool`, `libsndfile1`) are missing.
-
-Set `PARAKEET_HOTWORD_SOURCE=/path/to/repos` to scan a different corpus, or `PARAKEET_SKIP_HOTWORDS=1` to skip vocabulary/LM generation entirely.
+- Install OS dependencies (`ffmpeg`, `xdotool`, `libsndfile1`) via `apt-get` when available.
+- Create `~/Documents/parakeet_corpus` (drop extra source text there) and refresh `vocab.d/hotwords*.tsv` from both that folder and this repository.
+- Rebuild `lm/programming_5gram.binary` when KenLM binaries (`lmplz`, `build_binary`) are present, falling back to repo sources if the corpus folder is empty.
 
 Log output lands in `~/.cache/Parakeet/service.log`. Check service health with `systemctl --user status parakeet-ptt.service`.
 
@@ -71,9 +70,9 @@ cd ~/wa_parakeet
 ./scripts/download_model.py --model nvidia/parakeet-tdt-1.1b
 
 # (Recommended) Build vocab + LM assets (adjust source path to your repos)
-./scripts/refresh_hotwords.py ~/Documents/wise_apple
+./scripts/refresh_hotwords.py ~/wa_parakeet ~/Documents/parakeet_corpus
 ./scripts/curate_hotwords.py --limit 500
-./scripts/build_kenlm.py --source ~/Documents/wise_apple --output lm/programming_5gram.binary
+./scripts/build_kenlm.py --source ~/Documents/parakeet_corpus --output lm/programming_5gram.binary
 
 # Launch manually
 ./scripts/parakeet-ptt --append-space --allow-esc

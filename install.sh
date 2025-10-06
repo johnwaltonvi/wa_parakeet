@@ -8,9 +8,9 @@ SERVICE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 SERVICE_TEMPLATE="$ROOT_DIR/systemd/parakeet-ptt.service"
 SERVICE_PATH="$SERVICE_DIR/parakeet-ptt.service"
 MODEL_ID="nvidia/parakeet-tdt-1.1b"
-HOTWORD_SOURCE_DEFAULT="$HOME/Documents/wise_apple"
-HOTWORD_SOURCE="${PARAKEET_HOTWORD_SOURCE:-$HOTWORD_SOURCE_DEFAULT}"
-SKIP_HOTWORDS="${PARAKEET_SKIP_HOTWORDS:-0}"
+CORPUS_ROOT="$HOME/Documents/parakeet_corpus"
+SYSTEM_PACKAGES=(ffmpeg xdotool libsndfile1)
+COMMAND_CHECKS=(ffmpeg xdotool)
 
 step() {
   printf '\n==> %s\n' "$1"
@@ -31,14 +31,37 @@ warn_cmd() {
   return 0
 }
 
+install_system_packages() {
+  if command -v apt-get >/dev/null 2>&1; then
+    step "Installing system packages (${SYSTEM_PACKAGES[*]})"
+    sudo apt-get update -y
+    sudo apt-get install -y "${SYSTEM_PACKAGES[@]}"
+  else
+    echo "Warning: no supported package manager detected; install ${SYSTEM_PACKAGES[*]} manually." >&2
+  fi
+}
+
+ensure_corpus_root() {
+  if [ ! -d "$CORPUS_ROOT" ]; then
+    step "Creating corpus directory at $CORPUS_ROOT"
+    mkdir -p "$CORPUS_ROOT"
+  fi
+}
+
+has_corpus_files() {
+  find "$1" -type f -print -quit | grep -q .
+}
+
 step "Checking prerequisites"
 require_cmd python3
 require_cmd systemctl
 require_cmd bash
-warn_cmd ffmpeg || true
-warn_cmd xdotool || true
+install_system_packages
 
 # soundfile requires libsndfile at runtime; probe after venv setup
+for pkg in "${COMMAND_CHECKS[@]}"; do
+  warn_cmd "$pkg" || true
+done
 
 step "Bootstrapping Python environment"
 "$ROOT_DIR/scripts/bootstrap.sh"
@@ -51,28 +74,35 @@ if ! python -c "import soundfile" >/dev/null 2>&1; then
   echo "Warning: python package 'soundfile' failed to import. Ensure libsndfile1 is installed (e.g., 'sudo apt install libsndfile1')." >&2
 fi
 
-if [ "$SKIP_HOTWORDS" != "1" ]; then
-  if [ -d "$HOTWORD_SOURCE" ]; then
-    step "Refreshing hotword TSV from $HOTWORD_SOURCE"
-    if ! python "$ROOT_DIR/scripts/refresh_hotwords.py" "$HOTWORD_SOURCE"; then
-      echo "Warning: hotword refresh failed; inspect output above." >&2
-    else
-      if ! python "$ROOT_DIR/scripts/curate_hotwords.py"; then
-        echo "Warning: hotword curation failed; inspect output above." >&2
-      fi
-    fi
+ensure_corpus_root
 
-    if warn_cmd lmplz && warn_cmd build_binary; then
-      step "Building KenLM binary from $HOTWORD_SOURCE"
-      if ! python "$ROOT_DIR/scripts/build_kenlm.py" --source "$HOTWORD_SOURCE"; then
-        echo "Warning: KenLM build failed; install KenLM binaries and retry." >&2
-      fi
-    else
-      echo "Warning: KenLM binaries not found; skipping language model build." >&2
-    fi
-  else
-    echo "Warning: hotword source directory '$HOTWORD_SOURCE' not found; set PARAKEET_HOTWORD_SOURCE or export PARAKEET_SKIP_HOTWORDS=1 to silence." >&2
+HOTWORD_SOURCES=("$ROOT_DIR")
+if has_corpus_files "$CORPUS_ROOT"; then
+  HOTWORD_SOURCES+=("$CORPUS_ROOT")
+fi
+
+step "Refreshing hotword TSV from: ${HOTWORD_SOURCES[*]}"
+if ! python "$ROOT_DIR/scripts/refresh_hotwords.py" "${HOTWORD_SOURCES[@]}"; then
+  echo "Warning: hotword refresh failed; inspect output above." >&2
+else
+  if ! python "$ROOT_DIR/scripts/curate_hotwords.py"; then
+    echo "Warning: hotword curation failed; inspect output above." >&2
   fi
+fi
+
+KENLM_SOURCE="$CORPUS_ROOT"
+if ! has_corpus_files "$KENLM_SOURCE"; then
+  echo "Warning: no corpus files detected in $KENLM_SOURCE; falling back to repository sources." >&2
+  KENLM_SOURCE="$ROOT_DIR"
+fi
+
+if warn_cmd lmplz && warn_cmd build_binary; then
+  step "Building KenLM binary from $KENLM_SOURCE"
+  if ! python "$ROOT_DIR/scripts/build_kenlm.py" --source "$KENLM_SOURCE"; then
+    echo "Warning: KenLM build failed; install KenLM binaries and retry." >&2
+  fi
+else
+  echo "Warning: KenLM binaries not found; skipping language model build." >&2
 fi
 
 deactivate
