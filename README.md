@@ -28,6 +28,13 @@ This is my personal project, built while I migrated from Windows to Pop!_OS and 
 - Optional user-level systemd unit with restart-on-failure semantics
 - LanguageTool-powered grammar and punctuation cleanup with opt-out flag
 
+### Silence Guard Tuning
+- `--speech-min-duration-ms` *(default 250)* – minimum cumulative speech energy before transcription.
+- `--speech-rms-delta-db` *(default 8)* – minimum dB gap between peak speech energy and the silence floor.
+- `--speech-min-total-ms` *(default 0, disabled)* – optional minimum total clip duration.
+- `--speech-min-ratio` *(default 0.35)* – minimum proportion of the clip classified as speech.
+- `--speech-min-streak-ms` *(default 150)* – minimum contiguous speech streak required.
+
 ## Requirements
 - Linux desktop with X11 (tested on Pop!_OS / GNOME)
 - Python 3.10+ and `python3-venv`

@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import types
+import math
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -701,6 +702,36 @@ def parse_args() -> argparse.Namespace:
         default=str(DEFAULT_ACRONYM_CONFIG),
         help="YAML file defining custom acronym normalization rules",
     )
+    parser.add_argument(
+        "--speech-min-duration-ms",
+        type=float,
+        default=250.0,
+        help="Minimum cumulative speech duration (ms) required before transcription",
+    )
+    parser.add_argument(
+        "--speech-rms-delta-db",
+        type=float,
+        default=8.0,
+        help="Minimum peak vs silence energy delta (dB) required before transcription",
+    )
+    parser.add_argument(
+        "--speech-min-total-ms",
+        type=float,
+        default=0.0,
+        help="Optional minimum total clip duration (ms); 0 disables this check",
+    )
+    parser.add_argument(
+        "--speech-min-ratio",
+        type=float,
+        default=0.35,
+        help="Minimum fraction of the clip that must contain speech energy (0-1)",
+    )
+    parser.add_argument(
+        "--speech-min-streak-ms",
+        type=float,
+        default=150.0,
+        help="Minimum contiguous speech streak (ms) required before transcription",
+    )
     return parser.parse_args()
 
 
@@ -960,6 +991,16 @@ class Recorder:
         self._running = False
         self._worker: threading.Thread | None = None
         self._last_audio_time = 0.0
+        self._speech_duration_ms = 0.0
+        self._total_duration_ms = 0.0
+        self._max_rms = 0.0
+        self._silence_rms_sum = 0.0
+        self._silence_block_count = 0
+        self._speech_block_count = 0
+        self._total_block_count = 0
+        self._max_speech_streak_ms = 0.0
+        self._current_speech_streak_ms = 0.0
+        self._last_capture_stats: Dict[str, float | int | None] | None = None
 
     def start(self) -> Path:
         if self._running:
@@ -987,6 +1028,16 @@ class Recorder:
         self._stream.start()
         self._running = True
         self._last_audio_time = time.time()
+        self._speech_duration_ms = 0.0
+        self._total_duration_ms = 0.0
+        self._max_rms = 0.0
+        self._silence_rms_sum = 0.0
+        self._silence_block_count = 0
+        self._speech_block_count = 0
+        self._total_block_count = 0
+        self._max_speech_streak_ms = 0.0
+        self._current_speech_streak_ms = 0.0
+        self._last_capture_stats = None
 
         def worker():
             while self._running or not self._queue.empty():
@@ -998,8 +1049,23 @@ class Recorder:
                     block = np.clip(block * self.preamp, -1.0, 1.0)
                 self._writer.write(block)
                 rms = float(np.sqrt(np.mean(np.square(block), dtype=np.float64)))
+                frames = int(block.shape[0]) if block.ndim > 0 else 0
+                block_ms = (frames / self.sample_rate) * 1000.0 if frames > 0 else 0.0
+                self._total_duration_ms += block_ms
+                self._total_block_count += 1
+                self._max_rms = max(self._max_rms, rms)
                 if rms > self.rms_threshold:
                     self._last_audio_time = time.time()
+                    self._speech_duration_ms += block_ms
+                    self._speech_block_count += 1
+                    self._current_speech_streak_ms += block_ms
+                    if self._current_speech_streak_ms > self._max_speech_streak_ms:
+                        self._max_speech_streak_ms = self._current_speech_streak_ms
+                else:
+                    if rms > 0.0:
+                        self._silence_rms_sum += rms
+                        self._silence_block_count += 1
+                    self._current_speech_streak_ms = 0.0
 
         self._worker = threading.Thread(target=worker, daemon=True)
         self._worker.start()
@@ -1023,8 +1089,33 @@ class Recorder:
         if self._writer is not None:
             self._writer.close()
             self._writer = None
+        avg_silence_rms = None
+        if self._silence_block_count > 0:
+            avg_silence_rms = self._silence_rms_sum / self._silence_block_count
+        speech_max_db = 20 * math.log10(self._max_rms) if self._max_rms > 0 else None
+        silence_avg_db = (
+            20 * math.log10(avg_silence_rms) if avg_silence_rms and avg_silence_rms > 0 else None
+        )
+        delta_db = (
+            speech_max_db - silence_avg_db if speech_max_db is not None and silence_avg_db is not None else None
+        )
+        speech_ratio = (self._speech_duration_ms / self._total_duration_ms) if self._total_duration_ms > 0 else None
+        self._last_capture_stats = {
+            "speech_ms": self._speech_duration_ms,
+            "total_ms": self._total_duration_ms,
+            "speech_blocks": self._speech_block_count,
+            "total_blocks": self._total_block_count,
+            "speech_max_db": speech_max_db,
+            "silence_avg_db": silence_avg_db,
+            "speech_delta_db": delta_db,
+            "speech_ratio": speech_ratio,
+            "max_speech_streak_ms": self._max_speech_streak_ms,
+        }
         write_log("Recorder stopped", self.log_path)
         return self._file
+
+    def last_capture_stats(self) -> Dict[str, float | int | None] | None:
+        return self._last_capture_stats
 
 
 class AudioMuteError(Exception):
@@ -1254,6 +1345,11 @@ class ParakeetPTT:
 
         acronym_config = Path(args.acronym_config).expanduser()
         self.acronym_rules = _load_acronym_rules(acronym_config, self.log_path)
+        self.speech_min_duration_ms = max(0.0, args.speech_min_duration_ms)
+        self.speech_rms_delta_db = max(0.0, args.speech_rms_delta_db)
+        self.speech_min_total_ms = max(0.0, args.speech_min_total_ms)
+        self.speech_min_ratio = min(max(args.speech_min_ratio, 0.0), 1.0)
+        self.speech_min_streak_ms = max(0.0, args.speech_min_streak_ms)
 
     def _load_model(self, model_name: str) -> ASRModel:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -1448,6 +1544,68 @@ class ParakeetPTT:
             write_log(f"Acronym formatting applied: {old_preview!r} -> {new_preview!r}", self.log_path)
         return updated
 
+    def _should_transcribe(self, stats: Dict[str, float | int | None] | None) -> bool:
+        if stats is None:
+            write_log("No capture statistics collected; defaulting to transcription", self.log_path)
+            return True
+        total_ms = float(stats.get("total_ms") or 0.0)
+        speech_ms = float(stats.get("speech_ms") or 0.0)
+        speech_ratio = stats.get("speech_ratio")
+        speech_ratio = float(speech_ratio) if speech_ratio is not None else None
+        delta_db = stats.get("speech_delta_db")
+        delta_db = float(delta_db) if isinstance(delta_db, (int, float)) else None
+        max_streak_ms = float(stats.get("max_speech_streak_ms") or 0.0)
+
+        if total_ms <= 0.0:
+            write_log("Skipping transcription: capture contained zero duration", self.log_path)
+            return False
+        if self.speech_min_total_ms > 0.0 and total_ms < self.speech_min_total_ms:
+            write_log(
+                (
+                    "Skipping transcription: total duration "
+                    f"{total_ms:.1f} ms below configured floor {self.speech_min_total_ms:.1f} ms"
+                ),
+                self.log_path,
+            )
+            return False
+        if speech_ms < self.speech_min_duration_ms:
+            write_log(
+                (
+                    "Skipping transcription: accumulated speech energy "
+                    f"{speech_ms:.1f} ms below threshold {self.speech_min_duration_ms:.1f} ms"
+                ),
+                self.log_path,
+            )
+            return False
+        if speech_ratio is not None and speech_ratio < self.speech_min_ratio:
+            write_log(
+                (
+                    "Skipping transcription: speech ratio "
+                    f"{speech_ratio:.2f} below threshold {self.speech_min_ratio:.2f}"
+                ),
+                self.log_path,
+            )
+            return False
+        if max_streak_ms < self.speech_min_streak_ms:
+            write_log(
+                (
+                    "Skipping transcription: max speech streak "
+                    f"{max_streak_ms:.1f} ms below threshold {self.speech_min_streak_ms:.1f} ms"
+                ),
+                self.log_path,
+            )
+            return False
+        if delta_db is not None and delta_db < self.speech_rms_delta_db:
+            write_log(
+                (
+                    "Skipping transcription: speech energy delta "
+                    f"{delta_db:.1f} dB below threshold {self.speech_rms_delta_db:.1f} dB"
+                ),
+                self.log_path,
+            )
+            return False
+        return True
+
     def start_recording(self):
         with self.lock:
             if self.recording:
@@ -1475,6 +1633,39 @@ class ParakeetPTT:
 
         if not audio_path or audio_path.stat().st_size == 0:
             write_log("No audio captured", self.log_path)
+            return
+        stats = getattr(self.recorder, "last_capture_stats", None)
+        stats = stats() if callable(stats) else None
+        if not self._should_transcribe(stats):
+            if stats:
+                speech_ms = float(stats.get("speech_ms") or 0.0)
+                total_ms = float(stats.get("total_ms") or 0.0)
+                ratio = stats.get("speech_ratio")
+                delta_db = stats.get("speech_delta_db")
+                streak_ms = float(stats.get("max_speech_streak_ms") or 0.0)
+                write_log(
+                    (
+                        "Capture summary: speech_ms={speech_ms:.1f}, total_ms={total_ms:.1f}, "
+                        "ratio={ratio}, delta_db={delta}, max_streak_ms={streak:.1f}"
+                    ).format(
+                        speech_ms=speech_ms,
+                        total_ms=total_ms,
+                        ratio=(
+                            f"{float(ratio):.2f}" if isinstance(ratio, (int, float)) else "n/a"
+                        ),
+                        delta=(
+                            f"{float(delta_db):.1f}"
+                            if isinstance(delta_db, (int, float))
+                            else "n/a"
+                        ),
+                        streak=streak_ms,
+                    ),
+                    self.log_path,
+                )
+            try:
+                audio_path.unlink(missing_ok=True)
+            except OSError:
+                pass
             return
 
         write_log(f"Transcribing {audio_path}", self.log_path)
