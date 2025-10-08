@@ -4,6 +4,7 @@ acronyms:
       - "codex cli"
       - "codexcli"
       - "codexcly"
+      - "codecly"
       - "codecscly"
       - "codex kli"
       - "codex*cli"
@@ -36,3 +37,9 @@ acronyms:
     aliases: ["gpus"]
   - canonical: "SQL"
     aliases: ["sql"]
+  - canonical: "TDD"
+    aliases:
+      - "tdd"
+  - canonical: "MCP"
+    aliases:
+      - "mcp"

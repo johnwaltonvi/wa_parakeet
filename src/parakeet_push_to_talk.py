@@ -249,6 +249,7 @@ _DEFAULT_ACRONYM_ENTRIES: list[dict[str, Any]] = [
             "codex cli",
             "codexcli",
             "codexcly",
+            "codecly",
             "codecscly",
             "codex kli",
             "codex*cli",
@@ -274,6 +275,8 @@ _DEFAULT_ACRONYM_ENTRIES: list[dict[str, Any]] = [
     {"canonical": "GPU", "aliases": ["gpu"]},
     {"canonical": "GPUs", "aliases": ["gpus"]},
     {"canonical": "SQL", "aliases": ["sql"]},
+    {"canonical": "TDD", "aliases": ["tdd"]},
+    {"canonical": "MCP", "aliases": ["mcp"]},
 ]
 
 
