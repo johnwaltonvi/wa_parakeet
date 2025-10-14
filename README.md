@@ -149,7 +149,7 @@ The 1.1B Parakeet stack can be combined with the Flashlight beam-search decoder 
 - Use `./scripts/refresh_hotwords.py` to regenerate the hotword TSV and `./scripts/build_kenlm.py` to rebuild the KenLM binary whenever your projects change.
 - ⚠️ NeMo currently exposes only the built-in greedy/beam/MAES decoders for Parakeet-TDT models; if Flashlight integration is unavailable the listener logs a warning and keeps the model default decoder.
 - Punctuation and capitalization post-processing defaults to the NeMo `punctuation_en_bert` model; disable with `--disable-punctuation` or swap via `--punctuation-model`.
-- Emotion detection defaults to `speechbrain/emotion-recognition-wav2vec2-IEMOCAP`; disable with `--disable-emotion`, adjust confidence with `--emotion-threshold`, and add tags using `--emotion-tag`.
+- Emotion detection is off by default; enable `speechbrain/emotion-recognition-wav2vec2-IEMOCAP` with `--enable-emotion`, adjust confidence with `--emotion-threshold`, and add tags using `--emotion-tag`.
 - Cached Hugging Face models live under `~/.cache/huggingface/hub/`; remove folders for retired releases (for example, `models--nvidia--parakeet-tdt-0.6b-*`) if you need to reclaim disk space. The service boots with `nvidia/parakeet-tdt-1.1b` by default.
 - SpeechBrain uses a shimmed `speechbrain_modules/custom_interface.py` so the upstream wav2vec2 encoder resolves cleanly without editing installed packages. Keep it in sync with upstream releases when upgrading models.
 
@@ -160,7 +160,7 @@ The 1.1B Parakeet stack can be combined with the Flashlight beam-search decoder 
   - `--emotion-model` – switch to another SpeechBrain-compatible classifier.
   - `--emotion-threshold` – confidence (0–1) required before adding emphasis (default `0.35`).
   - `--emotion-tag` – prefix output with `[EMOTION]` when above threshold.
-  - `--disable-emotion` – bypass the SER stage entirely.
+  - `--enable-emotion` – opt-in to the SER stage (legacy `--disable-emotion` remains accepted but is redundant).
 - By default we append `!` when the detector is confident the speaker sounds excited/angry/surprised.
 - Canonical label mapping normalizes SpeechBrain short codes (`ang`, `hap`, `neu`, `sad`, etc.) before applying emphasis so thresholds behave consistently across classifiers.
 - Runtime logs live at `~/.cache/Parakeet/push_to_talk.log`; look for `Emotion detection: <label> (<score>)` entries when tuning thresholds or verifying the pipeline. Helper demos write to `/tmp/ptt_demo.log`.

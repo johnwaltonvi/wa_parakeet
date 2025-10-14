@@ -277,6 +277,9 @@ _DEFAULT_ACRONYM_ENTRIES: list[dict[str, Any]] = [
     {"canonical": "SQL", "aliases": ["sql"]},
     {"canonical": "TDD", "aliases": ["tdd"]},
     {"canonical": "MCP", "aliases": ["mcp"]},
+    {"canonical": "V2", "aliases": ["vto", "v 2"]},
+    {"canonical": ".", "aliases": ["dot"]},
+    {"canonical": "md", "aliases": ["md"]},
 ]
 
 
@@ -660,10 +663,18 @@ def parse_args() -> argparse.Namespace:
         help="Speech emotion recognition model to load (SpeechBrain foreign class string)",
     )
     parser.add_argument(
-        "--disable-emotion",
+        "--enable-emotion",
+        dest="emotion_enabled",
         action="store_true",
-        help="Disable emotion detection and emphasis adjustments",
+        help="Enable emotion detection and emphasis adjustments (disabled by default)",
     )
+    parser.add_argument(
+        "--disable-emotion",
+        dest="emotion_enabled",
+        action="store_false",
+        help=argparse.SUPPRESS,
+    )
+    parser.set_defaults(emotion_enabled=False)
     parser.add_argument(
         "--emotion-threshold",
         type=float,
@@ -1300,8 +1311,8 @@ class ParakeetPTT:
             self.punctuation_model = _load_punctuation_model(args.punctuation_model, device, self.log_path)
             if self.punctuation_model is None:
                 write_log("Continuing without punctuation post-processing", self.log_path)
-        if args.disable_emotion:
-            write_log("Emotion detection disabled via flag", self.log_path)
+        if not args.emotion_enabled:
+            write_log("Emotion detection disabled", self.log_path)
             self.emotion_model = None
         else:
             self.emotion_model = _load_emotion_model(args.emotion_model, device, self.log_path)
